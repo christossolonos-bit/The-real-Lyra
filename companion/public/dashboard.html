@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Dashboard</title>
+<style>
+  :root{ --bg:#050a0e; --panel:#0b151c; --panel2:#0f1d26; --line:#17303d; --text:#d9eef5; --muted:#7c9aa6; --cyan:#3fe0ff; --cyan2:#0f6f86; --ok:#46d39a; --warn:#ffb86b; --bad:#ff6b7a; }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 20px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:2}
+  header h1{margin:0;font-size:17px;letter-spacing:.3em;color:var(--cyan);font-weight:600}
+  header .sub{color:var(--muted);font-size:12px;letter-spacing:.1em;text-transform:uppercase}
+  header nav{margin-left:auto;display:flex;gap:8px}
+  a.btn,button{background:#0a141b;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font:inherit;cursor:pointer;text-decoration:none}
+  a.btn:hover,button:hover{border-color:var(--cyan2)}
+  button.primary{background:var(--cyan2);border-color:var(--cyan)}
+  button.danger{border-color:#5a2730}
+  button:disabled{opacity:.45;cursor:default}
+  main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;padding:16px 20px;max-width:1300px;margin:0 auto}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+  section h2{margin:0 0 10px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0}
+  .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:3px 10px;font-size:12px;border:1px solid var(--line);background:var(--panel2)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+  .online .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)} .starting .dot,.stopping .dot{background:var(--warn)} .offline .dot{background:var(--bad)}
+  .who{display:flex;align-items:center;gap:10px}
+  .who img{width:40px;height:40px;border-radius:50%;border:1px solid var(--line)}
+  .muted{color:var(--muted)} .err{color:var(--bad);font-size:13px}
+  ul.plain{list-style:none;margin:0;padding:0}
+  ul.plain li{padding:5px 0;border-bottom:1px solid #102029}
+  ul.plain li:last-child{border-bottom:0}
+  #feed{max-height:520px;overflow-y:auto;font-size:13px}
+  #feed li{display:grid;grid-template-columns:52px 64px 1fr;gap:8px;align-items:start}
+  #feed time{color:var(--muted);font-variant-numeric:tabular-nums}
+  .kind{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .kind.error{color:var(--bad)} .kind.voice{color:var(--cyan)} .kind.text{color:#9fd6ff} .kind.power{color:var(--ok)}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .gate{max-width:420px;margin:12vh auto;text-align:center}
+  .gate input{width:100%;background:#0a141b;border:1px solid var(--line);border-radius:9px;color:var(--text);font:inherit;padding:10px;margin:10px 0}
+  @media (max-width:860px){ main{grid-template-columns:1fr;padding:12px 16px} header{flex-wrap:wrap} header nav{margin-left:0} }
+</style>
+</head>
+<body>
+<header>
+  <h1>LYRA</h1><span class="sub">Dashboard</span>
+  <nav><a class="btn" href="/" target="lyra-talk">Talk to her</a><a class="btn" href="/creator/" target="lyra-creator">Creator</a></nav>
+</header>
+<div id="app" hidden>
+<main>
+  <div class="stack">
+    <section>
+      <h2>Discord</h2>
+      <div class="row">
+        <div class="who"><img id="dcAvatar" alt="" hidden><div><div id="dcTag">lunabot</div><div class="muted" id="dcServers"></div></div></div>
+        <span class="pill offline" id="dcState"><span class="dot"></span><span>offline</span></span>
+      </div>
+      <div class="row">
+        <button class="primary" id="login">Log in to Discord</button>
+        <button class="danger" id="logout">Log out</button>
+        <button id="leave">Leave voice call</button>
+      </div>
+      <div class="err" id="dcError"></div>
+      <p class="muted" id="dcHint">Logs in with lunabot's token and answers as Lyra. Don't run Luna at the same time.</p>
+      <h2 style="margin-top:14px">Voice calls</h2>
+      <ul class="plain" id="voice"><li class="muted">Not in a call. In Discord, join a voice channel and type /join.</li></ul>
+    </section>
+    <section>
+      <h2>Lyra right now</h2>
+      <div class="row"><span class="pill" id="mood">feeling calm</span><span class="pill" id="ears"><span class="dot"></span><span>ears</span></span></div>
+      <h2 style="margin-top:12px">Journal</h2>
+      <ul class="plain" id="journal"><li class="muted">Empty so far.</li></ul>
+      <h2 style="margin-top:12px">How she's changing</h2>
+      <ul class="plain" id="growth"><li class="muted">Nothing yet.</li></ul>
+      <p class="muted" id="people"></p>
+    </section>
+  </div>
+  <section>
+    <h2>Discord activity</h2>
+    <ul class="plain" id="feed"><li class="muted">Nothing yet.</li></ul>
+  </section>
+</main>
+</div>
+<div class="gate" id="gate" hidden>
+  <h1 style="letter-spacing:.3em;color:var(--cyan)">LYRA</h1>
+  <p class="muted">The dashboard is for Chris. Open it from Lyra's page, or paste your owner key.</p>
+  <input id="key" placeholder="Owner key" autocomplete="off"><button class="primary" id="useKey">Open</button>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+let key = ''; try { key = localStorage.getItem('lyra-owner') || ''; } catch {}
+const api = (path) => fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ownerKey: key }) })
+  .then((r) => (r.status === 404 ? { error: 'This Lyra is an older version. Close her black window and run Start Lyra.bat again.' } : r.json()));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const hhmm = (t) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+const ago = (iso) => { const h = (Date.now() - Date.parse(iso)) / 36e5; return h < 1 ? 'just now' : h < 24 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`; };
+
+function renderDiscord(s) {
+  if (s.error === 'owner only') return showGate();
+  if (s.error) { $('dcError').textContent = s.error; return; }
+  const st = $('dcState'); st.className = `pill ${s.state}`; st.lastElementChild.textContent = s.state;
+  $('dcTag').textContent = s.tag || 'lunabot (not logged in)';
+  $('dcServers').textContent = s.servers.length ? `${s.servers.length} server(s): ${s.servers.join(', ')}` : '';
+  if (s.avatar) { $('dcAvatar').src = s.avatar; $('dcAvatar').hidden = false; }
+  $('dcError').textContent = s.error || (s.tokenSet ? '' : 'No DISCORD_TOKEN in .env');
+  $('login').disabled = !s.tokenSet || s.state !== 'offline';
+  $('logout').disabled = s.state === 'offline';
+  $('leave').disabled = !s.voice.length;
+  $('voice').innerHTML = s.voice.length
+    ? s.voice.map((v) => `<li><b>${esc(v.channel)}</b> <span class="muted">in ${esc(v.server)} · ${v.people} ${v.people === 1 ? 'person' : 'people'}</span></li>`).join('')
+    : '<li class="muted">Not in a call. In Discord, join a voice channel and type /join.</li>';
+  $('feed').innerHTML = s.log.length
+    ? [...s.log].reverse().map((e) => `<li><time>${hhmm(e.at)}</time><span class="kind ${e.kind}">${esc(e.kind)}</span><span>${esc(e.text)}</span></li>`).join('')
+    : '<li class="muted">Nothing yet.</li>';
+}
+function renderMind(d) {
+  if (d.error) return;
+  const m = d.mind.mood; $('mood').textContent = `feeling ${m.name}`;
+  const e = $('ears'); e.className = `pill ${d.ears.connected ? 'online' : 'offline'}`;
+  e.lastElementChild.textContent = d.ears.connected ? (d.ears.micOn ? 'ears listening' : 'ears on, mic off') : 'ears not running';
+  $('journal').innerHTML = d.mind.journal.length ? [...d.mind.journal].reverse().slice(0, 6).map((j) => `<li>${esc(j.text)} <span class="muted">· ${ago(j.at)}</span></li>`).join('') : '<li class="muted">Empty so far.</li>';
+  $('growth').innerHTML = d.mind.growth.length ? [...d.mind.growth].reverse().slice(0, 5).map((g) => `<li>${esc(g.text)} <span class="muted">· ${ago(g.at)}</span></li>`).join('') : '<li class="muted">Nothing yet.</li>';
+  $('people').textContent = d.mind.people.length ? `She knows ${d.mind.people.length} ${d.mind.people.length === 1 ? 'person' : 'people'}: ${d.mind.people.join(', ')}` : '';
+}
+async function refresh() {
+  const [s, d] = await Promise.all([api('/api/discord/status'), api('/api/dashboard')]).catch(() => [{ error: 'Lyra is not running' }, { error: 1 }]);
+  renderDiscord(s); renderMind(d);
+}
+async function act(path, btn) { btn.disabled = true; renderDiscord(await api(path)); setTimeout(refresh, 800); }
+$('login').onclick = (e) => act('/api/discord/start', e.target);
+$('logout').onclick = (e) => act('/api/discord/stop', e.target);
+$('leave').onclick = (e) => act('/api/discord/leave-voice', e.target);
+
+function showGate() { $('app').hidden = true; $('gate').hidden = false; }
+$('useKey').onclick = () => { key = $('key').value.trim(); try { localStorage.setItem('lyra-owner', key); } catch {} start(); };
+async function start() {
+  const w = await api('/api/whoami').catch(() => ({}));
+  if (!w.isOwner) return showGate();
+  $('gate').hidden = true; $('app').hidden = false;
+  refresh(); setInterval(refresh, 4000);
+  const ev = new EventSource('/api/events');
+  ev.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'discord-status' || m.type === 'discord') refresh(); };
+}
+start();
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Journal</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#5865f2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111114; --panel:#1a1a1f; --text:#ececf1; --muted:#9a9aa6; --border:#2d2d35; --accent:#7983ff; }
+  }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 system-ui,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); }
+  header a { color:var(--muted); text-decoration:none; }
+  main { max-width:820px; margin:0 auto; padding:24px 16px 60px; }
+  .day { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px; margin-bottom:16px; white-space:pre-wrap; }
+  .day h2 { margin:0 0 10px; font-size:15px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .empty { color:var(--muted); padding:40px 0; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <strong id="title">Journal</strong>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<script>
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+fetch('/api/status').then((r) => r.json()).then((s) => { if (s.bot?.tag) document.getElementById('title').textContent = `${s.bot.tag.split('#')[0]}'s journal`; }).catch(() => {});
+fetch('/api/journal').then((r) => r.json()).then((data) => {
+  const main = document.getElementById('main');
+  const days = data.days || [];
+  if (!days.length) { main.innerHTML = '<div class="empty">No journal entries yet. When curiosity or boredom fires, she writes here.</div>'; return; }
+  main.innerHTML = days.map((d) => `<article class="day"><h2>${esc(d.date)}</h2>${esc(d.text)}</article>`).join('');
+}).catch((err) => { document.getElementById('main').innerHTML = `<div class="empty">${esc(err.message)}</div>`; });
+</script>
+</body>
+</html>

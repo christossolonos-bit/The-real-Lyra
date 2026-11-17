@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Her Mind</title>
+<style>
+  /* the region colours (--c-hearing …) are set from mind-brain.js, the one brain her eyes share */
+  :root{--bg:#05070d;--panel:#0b101b;--line:#172036;--text:#dfe6f5;--dim:#7d8aa8;--mute:#4a5570;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.4 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  .grid{display:grid;grid-template-columns:290px 1fr 330px;grid-template-rows:46px 1fr 140px;height:100vh;gap:8px;padding:8px}
+  header{grid-column:1/4;display:flex;align-items:center;gap:18px;padding:0 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  header h1{font-size:14px;margin:0;letter-spacing:.14em;text-transform:uppercase;color:#fff;font-weight:600}
+  header .stat{color:var(--dim);font-variant-numeric:tabular-nums}
+  header .stat b{color:var(--text)}
+  header .live{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--dim)}
+  header .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 10px #22c55e}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:hidden;position:relative}
+  .panel h2{margin:0 0 8px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+  #left{overflow:auto}
+  .bucket{display:grid;grid-template-columns:92px 1fr 34px;align-items:center;gap:8px;margin:0 0 6px;font-size:12px}
+  .bucket .name{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bucket .bar{position:relative;height:12px;background:#0f1626;border-radius:6px;overflow:hidden}
+  .bucket .fill{position:absolute;inset:0 auto 0 0;border-radius:6px;background:linear-gradient(90deg,var(--c-pressure),#ff9ab6);transition:width .3s linear}
+  .bucket .thr{position:absolute;top:0;bottom:0;width:2px;background:#fff;opacity:.6}
+  .bucket .spark{position:absolute;inset:0;pointer-events:none}
+  .bucket .val{text-align:right;font-variant-numeric:tabular-nums}
+  .bucket.feel .fill{background:linear-gradient(90deg,var(--c-feelings),#ffd38a)}
+  .bucket.fired .bar{box-shadow:0 0 0 2px #fff inset,0 0 18px var(--c-pressure)}
+  .group{margin:10px 0 6px;color:var(--mute);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+  #center{padding:0;background:radial-gradient(900px 600px at 50% 45%,#0b1222 0%,#05070d 70%)}
+  #gl{width:100%;height:100%;display:block}
+  #center .caption{position:absolute;left:14px;top:12px;color:var(--dim);font-size:11px;max-width:55%;pointer-events:none}
+  #center .caption b{display:block;color:#fff;font-weight:600;font-size:13px;letter-spacing:.06em}
+  #center .legend{position:absolute;right:12px;top:12px;display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:10px;color:var(--dim);pointer-events:none}
+  #center .legend span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:var(--c);box-shadow:0 0 8px var(--c)}
+  #center .legend span.on{color:#fff}
+  #center .hint{position:absolute;left:14px;bottom:10px;color:var(--mute);font-size:10px;pointer-events:none}
+  #labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+  #labels .lab{position:absolute;transform:translate(-50%,-140%);font-size:10px;color:#fff;background:rgba(5,7,13,.55);border:1px solid var(--c);border-radius:6px;padding:1px 6px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;box-shadow:0 0 12px var(--c);transition:opacity .4s}
+  /* the director: thought bubbles, close-up name tags, and the camera controls (owner, 2026-11-13: "zoom in, circle
+     around, follow neurons… if she's thinking about some stuff, little chat bubble things that pop up") */
+  #labels .det{position:absolute;transform:translate(-50%,-50%);font-size:10px;color:#e8ecf7;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;text-shadow:0 0 6px var(--c),0 0 2px #000;letter-spacing:.02em;transition:opacity .25s}
+  #labels .det::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:5px;background:var(--c);box-shadow:0 0 8px var(--c);vertical-align:middle}
+  #labels .bub{position:absolute;left:0;top:0;width:max-content;max-width:270px;padding:8px 12px 9px;border-radius:16px;color:#f4f6fb;font-size:12px;line-height:1.38;
+    background:linear-gradient(160deg,color-mix(in srgb,var(--c) 26%,rgba(10,14,26,.78)),rgba(8,11,20,.72));border:1px solid color-mix(in srgb,var(--c) 70%,transparent);
+    box-shadow:0 0 22px color-mix(in srgb,var(--c) 45%,transparent),inset 0 0 18px color-mix(in srgb,var(--c) 18%,transparent);backdrop-filter:blur(6px);
+    transform-origin:50% 100%;opacity:0;transition:opacity .35s ease;will-change:transform}
+  #labels .bub::after{content:"";position:absolute;left:50%;bottom:-7px;width:12px;height:12px;margin-left:-6px;transform:rotate(45deg);background:rgba(9,12,22,.85);border-right:1px solid color-mix(in srgb,var(--c) 70%,transparent);border-bottom:1px solid color-mix(in srgb,var(--c) 70%,transparent)}
+  #labels .bub .kind{display:block;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--c);margin-bottom:2px;text-shadow:0 0 8px var(--c)}
+  #labels .bub .txt::after{content:"▍";color:var(--c);margin-left:1px;animation:blink 1s steps(1) infinite}
+  #labels .bub.done .txt::after{content:""}
+  #labels .bub .dot3{position:absolute;left:50%;bottom:-22px;width:7px;height:7px;margin-left:-3px;border-radius:50%;background:var(--c);box-shadow:0 0 10px var(--c);opacity:.8}
+  @keyframes blink{50%{opacity:0}}
+  #director{position:absolute;right:12px;bottom:10px;display:flex;gap:4px;z-index:3}
+  #director button{font:600 10px "Segoe UI",system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);background:rgba(11,16,27,.8);border:1px solid var(--line);border-radius:7px;padding:5px 9px;cursor:pointer}
+  #director button.on{color:#fff;border-color:#4b5f8a;box-shadow:0 0 12px rgba(120,150,255,.25)}
+  #director button kbd{font:inherit;opacity:.5;margin-left:5px}
+  #center .legend{pointer-events:auto} #center .legend span{cursor:pointer}
+  #center .focusline{position:absolute;left:50%;top:12px;transform:translateX(-50%);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);pointer-events:none;opacity:0;transition:opacity .4s}
+  #center .focusline.on{opacity:1}
+  .grid.big #left,.grid.big #right,.grid.big #ticker{display:none}
+  .grid.big #center{grid-column:1/4;grid-row:2/4}
+  #right{display:flex;flex-direction:column;gap:10px;overflow:hidden}
+  .waves canvas{width:100%;height:50px;display:block;background:#080d18;border-radius:8px;margin-bottom:6px}
+  .waves .lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);margin-bottom:2px}
+  #hearing{flex:1;overflow:auto}
+  .line{padding:6px 8px;border-left:2px solid var(--c-hearing);background:#080d18;border-radius:0 8px 8px 0;margin-bottom:6px}
+  .line .who{color:var(--c-hearing);font-size:11px}
+  .line .chips{margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+  .chip{font-size:10px;padding:1px 6px;border-radius:9px;background:#1b1535;color:#c4b5fd;border:1px solid #3b2d6e}
+  .chip.hot{background:#3b1d2b;color:#ffb3c7;border-color:#7a2d45}
+  #ticker{grid-column:1/4;overflow:hidden}
+  #ticker .rows{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;font-size:11px;font-variant-numeric:tabular-nums}
+  #ticker .ev{display:flex;gap:8px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ticker .ev .t{color:var(--mute)}
+  #ticker .ev .k{color:var(--c);min-width:72px}
+  #ticker .ev .m{color:var(--text);overflow:hidden;text-overflow:ellipsis}
+  /* the points game: her level and XP in the header, points popping out of her brain, a level-up banner, the boards */
+  header .lvl{display:flex;align-items:center;gap:8px;color:var(--dim)}
+  header .lvl b{color:#fff;font-weight:600}
+  header .lvl .title{color:#ffd166;letter-spacing:.08em;text-transform:uppercase;font-size:11px}
+  header .xpbar{width:120px;height:8px;background:#0f1626;border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+  header .xpbar span{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd166,#ff8fab);box-shadow:0 0 10px #ffd166;transition:width .6s ease}
+  header .cats{display:flex;gap:10px;font-size:11px;font-variant-numeric:tabular-nums}
+  header .cats span{color:var(--c)}
+  #labels .pop{position:absolute;left:0;top:0;font:800 18px "Segoe UI",system-ui,sans-serif;color:var(--c);text-shadow:0 0 12px var(--c),0 0 3px #000;white-space:nowrap;pointer-events:none;will-change:transform,opacity}
+  #labels .pop small{display:block;font:600 10px "Segoe UI",sans-serif;color:#e8ecf7;text-shadow:0 0 4px #000;max-width:220px;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+  #labels .pop.loss{--c:#ff5c5c}
+  #levelup{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%) scale(.6);opacity:0;pointer-events:none;text-align:center;transition:opacity .4s,transform .6s cubic-bezier(.2,1.6,.4,1);z-index:4}
+  #levelup.on{opacity:1;transform:translate(-50%,-50%) scale(1)}
+  #levelup b{display:block;font:900 34px "Segoe UI",system-ui,sans-serif;letter-spacing:.2em;color:#fff;text-shadow:0 0 24px #ffd166,0 0 60px #ff8fab}
+  #levelup span{font:600 14px "Segoe UI",sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#ffd166;text-shadow:0 0 12px #ffd166}
+  #board{flex:0 0 auto;max-height:42%;min-height:96px;overflow:auto}
+  #board .tabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+  #board .tabs button{font:600 9px "Segoe UI",sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);background:#0f1626;border:1px solid var(--line);border-radius:6px;padding:3px 6px;cursor:pointer}
+  #board .tabs button.on{color:#fff;border-color:#4b5f8a}
+  #board .row{display:grid;grid-template-columns:18px 1fr auto;gap:6px;font-size:12px;padding:3px 0;border-bottom:1px solid #111a2c}
+  #board .row .n{color:var(--mute);text-align:right}
+  #board .row .v{font-variant-numeric:tabular-nums;color:#ffd166}
+  #board .row.neg .v{color:#ff7b7b}
+  #board .empty{color:var(--mute);font-size:11px}
+  #board h2 a{float:right;color:var(--dim);letter-spacing:.05em;text-transform:none}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+</head>
+<body>
+<div class="grid">
+  <header>
+    <h1>Her Mind</h1>
+    <span class="lvl">level <b id="lvl">–</b><span class="title" id="lvlTitle"></span><span class="xpbar"><span id="xpFill"></span></span><b id="xp">–</b> XP</span>
+    <span class="cats"><span style="--c:var(--c-memory)">knowledge <b id="cKnowledge">0</b></span><span style="--c:var(--c-thoughts)">mind <b id="cMind">0</b></span><span style="--c:var(--c-feelings)">bond <b id="cBond">0</b></span><span style="--c:var(--c-presence)">standing <b id="cStanding">0</b></span></span>
+    <span class="stat">pressure <b id="total">–</b></span>
+    <span class="stat">last want <b id="lastWant">–</b></span>
+    <span class="stat">lines/min <b id="lpm">0</b></span>
+    <span class="stat">tool calls/min <b id="tpm">0</b></span>
+    <span class="stat">firing <b id="fpm">0</b>/min</span>
+    <span class="live"><span class="dot" id="dot"></span><span id="conn">connecting</span></span>
+  </header>
+  <section class="panel" id="left"><h2>Buckets</h2><div id="buckets"></div></section>
+  <section class="panel" id="center">
+    <canvas id="gl"></canvas>
+    <div class="caption"><b id="capTitle">quiet</b><span id="capText">nothing fires unless something happened</span></div>
+    <div class="legend" id="legend"></div>
+    <div class="hint">drag to turn · wheel to zoom · click a region to fly there · double-click a neuron · <span id="knowCount">0</span> things she knows, growing · <a href="mind-graph.html" style="color:inherit;pointer-events:auto">her knowledge graph ↗</a></div>
+    <div id="labels"></div>
+    <div id="levelup"><b id="levelupText">LEVEL UP</b><span id="levelupTitle"></span></div>
+    <div class="focusline" id="focusline"></div>
+    <div id="director"><button data-mode="follow">Follow<kbd>F</kbd></button><button data-mode="orbit">Orbit<kbd>O</kbd></button><button id="bigBtn">Bigger<kbd>B</kbd></button></div>
+  </section>
+  <section class="panel" id="right">
+    <div id="board"><h2>Leaderboard <a href="scoreboard.html" target="_blank" rel="noopener">full scoreboard ↗</a></h2><div class="tabs" id="boardTabs"></div><div id="boardRows"><div class="empty">nobody has points yet</div></div></div>
+    <div class="waves">
+      <h2>Frequencies</h2>
+      <div class="lbl"><span>what she hears (lines)</span><span id="w1v"></span></div><canvas id="w1"></canvas>
+      <div class="lbl"><span>intake energy (what it does to her)</span><span id="w2v"></span></div><canvas id="w2"></canvas>
+      <div class="lbl"><span>her activity (tools, thoughts, wants)</span><span id="w3v"></span></div><canvas id="w3"></canvas>
+    </div>
+    <div id="hearing"><h2>Hearing</h2><div id="lines"></div></div>
+  </section>
+  <section class="panel" id="ticker"><h2>Everything, as it happens</h2><div class="rows" id="rows"></div></section>
+</div>
+<script type="module">
+import * as THREE from 'three';
+// Her brain itself (neurons, fibres, lightning, her knowledge web, which event fires where) is mind-brain.js, the
+// same brain her avatar's eyes show (avatar-mind.js). This page is the full-size view of it: the camera director,
+// thought bubbles, labels, buckets, frequencies and the ticker.
+import { createMind, listenMind, REGIONS, KEYS, REGION_COLORS, alongPath, POINTS_REGION } from './mind-brain.js';
+import { createFireworks } from './mind-fireworks.js';
+for(const k of KEYS)document.documentElement.style.setProperty(`--c-${k}`,REGION_COLORS[k]);
+const css=(v)=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const canvas=document.getElementById('gl');const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});renderer.setPixelRatio(Math.min(2,devicePixelRatio));
+const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(42,1,0.1,50);camera.position.set(0,0.3,3.6);
+// floating labels for what just fired
+const labelBox=document.getElementById('labels');const floating=[];
+function label3d(it,fresh){if(floating.length>=7){const old=floating.shift();old.el.remove();}const el=document.createElement('div');el.className='lab';el.style.setProperty('--c',css(`--c-${it.region}`));el.textContent=(fresh?'+ ':'')+it.label;labelBox.append(el);floating.push({it,el,t:0});}
+function projectLabels(dt){const r=canvas.getBoundingClientRect();const v=new THREE.Vector3();for(let i=floating.length-1;i>=0;i--){const f=floating[i];f.t+=dt;if(f.t>3.2){f.el.remove();floating.splice(i,1);continue;}v.set(...P(f.it)).project(camera);const x=(v.x*0.5+0.5)*r.width,y=(-v.y*0.5+0.5)*r.height;f.el.style.left=x+'px';f.el.style.top=y+'px';f.el.style.opacity=f.t>2.4?String(1-(f.t-2.4)/0.8):'1';}}
+const legend=document.getElementById('legend');legend.innerHTML=KEYS.map((k)=>`<span id="lg-${k}" style="--c:var(--c-${k})">${REGIONS[k].label}</span>`).join('');
+function setLegend(k){const el=document.getElementById(`lg-${k}`);el.classList.add('on');setTimeout(()=>el.classList.remove('on'),1500);}
+// this page keeps her knowledge web (persist); her eyes read it
+const mind=createMind(THREE,{persist:true,onRegion:(k)=>setLegend(k),onTouch:(it,fresh)=>label3d(it,fresh),onGrow:(n)=>{document.getElementById('knowCount').textContent=n;}});
+scene.add(mind.group);
+const {sparks,itemList,iact,fireRegion,addItem,P,H}=mind;
+// fireworks for real learning and real points (mind-fireworks.js)
+const fw=createFireworks(THREE);scene.add(fw.group);
+let capTimer=null;function cap(title,text){document.getElementById('capTitle').textContent=title;document.getElementById('capText').textContent=String(text||'').slice(0,180);clearTimeout(capTimer);capTimer=setTimeout(()=>{document.getElementById('capTitle').textContent='quiet';document.getElementById('capText').textContent='nothing fires unless something happened';},8000);}
+// ---------- camera: the director (follow) or a free orbit; drag to turn, wheel to zoom ----------
+// Orbit is how this page always was: a slow turn around the whole brain. Follow is the director: when something real
+// fires, the camera flies to the neuron it lit, rides the bolt as it travels to where it lands, then circles there close
+// up; when she goes quiet it eases back out to the whole brain. Clicking a region in the legend flies there; double-
+// clicking a knowledge neuron focuses it. Close up, the things she knows around the camera show their names.
+let yaw=0.25,pitch=0.12,dist=3.6,dragging=false,lx=0,ly=0,auto=true;
+const look=new THREE.Vector3(),wantLook=new THREE.Vector3();
+const FAR=3.6,NEAR=1.15;let zoomBias=1,focus=null,ride=null,lastFocusAt=0;
+let camMode=(()=>{try{return localStorage.getItem('mind-cam')||'follow';}catch{return 'follow';}})();
+function setMode(m){camMode=m;try{localStorage.setItem('mind-cam',m);}catch{}for(const b of document.querySelectorAll('#director [data-mode]'))b.classList.toggle('on',b.dataset.mode===m);if(m==='orbit'){focus=null;ride=null;}auto=true;}
+document.querySelectorAll('#director [data-mode]').forEach((b)=>b.addEventListener('click',()=>setMode(b.dataset.mode)));setMode(camMode);
+const gridEl=document.querySelector('.grid');function toggleBig(){gridEl.classList.toggle('big');document.getElementById('bigBtn').classList.toggle('on',gridEl.classList.contains('big'));setTimeout(resize,30);}
+document.getElementById('bigBtn').addEventListener('click',toggleBig);
+addEventListener('keydown',(e)=>{if(e.target.closest?.('input,textarea'))return;const k=e.key.toLowerCase();if(k==='f')setMode('follow');else if(k==='o')setMode('orbit');else if(k==='b')toggleBig();else if(k==='escape'){focus=null;ride=null;}});
+canvas.addEventListener('pointerdown',(e)=>{dragging=true;auto=false;lx=e.clientX;ly=e.clientY;});addEventListener('pointerup',()=>{dragging=false;setTimeout(()=>{if(!dragging)auto=true;},4000);});
+addEventListener('pointermove',(e)=>{if(!dragging)return;yaw+=(e.clientX-lx)*0.006;pitch=Math.max(-1.2,Math.min(1.2,pitch+(e.clientY-ly)*0.006));lx=e.clientX;ly=e.clientY;});
+canvas.addEventListener('wheel',(e)=>{zoomBias=Math.max(0.35,Math.min(2.2,zoomBias*(1+e.deltaY*0.0012)));},{passive:true});
+function focusOn(p,label,color,ms=7000,close=NEAR){focus={p,label,color,until:performance.now()+ms,close};const fl=document.getElementById('focusline');fl.textContent=label?`↘ ${label}`:'';fl.style.color=color||'';fl.classList.toggle('on',Boolean(label));}
+// legend: fly to a region
+document.getElementById('legend').addEventListener('click',(e)=>{const s=e.target.closest('span[id^="lg-"]');if(!s)return;const k=s.id.slice(3);focusOn(H(k),REGIONS[k].label,css(`--c-${k}`),20000,1.4);fireRegion(k,0.6);});
+// double-click: the knowledge neuron nearest the pointer on screen
+canvas.addEventListener('dblclick',(e)=>{const r=canvas.getBoundingClientRect(),v=new THREE.Vector3();let best=null,bd=28*28;for(const it of itemList){v.set(...P(it)).project(camera);if(v.z>1)continue;const x=(v.x*0.5+0.5)*r.width-(e.clientX-r.left),y=(-v.y*0.5+0.5)*r.height-(e.clientY-r.top);const d=x*x+y*y;if(d<bd){bd=d;best=it;}}
+  if(!best)return;focusOn(P(best),`${REGIONS[best.region].label} · ${best.label}`,css(`--c-${best.region}`),25000,0.75);iact[best.idx]=1.6;for(const j of best.links)iact[j]=Math.max(iact[j],0.9);bubble(best.region,best.region==='hearing'?'someone she knows':'what she knows',`${best.label}${best.count>1?` · touched ${best.count} times`:''}${best.links.size?` · linked to ${best.links.size}`:''}`,P(best));});
+// What's worth the camera's attention, and what she's thinking out loud: the event's real words, never made up.
+const BUBBLE={thought:['thinking',(e)=>e.topic??e.message],plan:['planning',(e)=>e.empty?'just talking':(e.tools||[]).join(', ')||e.reason||e.search],curiosity:['wondering',(e)=>e.wondering??e.asked??e.answered],'question-forge':['wondering',(e)=>e.asked??e.question],'self-realize':['realizing',(e)=>e.aspect??e.message],
+  intuition:['gut feeling',(e)=>e.gut??e.repeated],remembered:['remembering',(e)=>(e.facts||[])[0]],memory:['recalling',(e)=>e.preview||`${e.count??0} memories`],reaction:['reacting',(e)=>`${e.style}${e.why?` · ${e.why}`:''}`],replied:['saying',(e)=>e.text],
+  music:['playing',(e)=>e.playing||(e.tracks||[]).join(', ')||e.query||e.action],search:['searching',(e)=>e.query],hands:['using',(e)=>(e.calls||[]).join(', ')],
+  dream:['dreaming',(e)=>e.message??e.scene],journal:['journaling',(e)=>e.title||e.query||e.message],discovery:['first time',(e)=>`using ${e.tool}`],architect:['building',(e)=>e.task??e.status],doctor:['healing',(e)=>e.task??e.status],task:['working',(e)=>e.title||e.task||e.message]};
+function direct(e,r,made,newSparks){const b=BUBBLE[e.type];let text=b?b[1](e):null;let kind=b?.[0];
+  if(e.type==='pressure'&&e.fired){kind='wants';text=`${String(e.fired).replace(/_/g,' ')}${e.want?`: ${e.want}`:''}`;}
+  if(e.type==='tool-call'&&!e.ok){kind='that failed';text=`${e.tool}: ${e.error??''}`;}
+  const anchor=made[0]?P(made[0]):H(r.at);
+  if(text&&String(text).trim())bubble(made[0]?.region??r.at,kind,String(text),anchor);
+  // the camera goes where it matters: something she thought, wanted, said, felt or did, not every tick
+  const notable=Boolean(text)||r.amp>=0.9;const now=performance.now();
+  if(camMode!=='follow'||!notable||(focus&&now<focus.until&&now-lastFocusAt<3500&&!text))return;
+  lastFocusAt=now;focusOn(anchor,`${REGIONS[r.at].label}${made[0]?` · ${made[0].label}`:''}`,css(`--c-${r.at}`),text?8000:5000);
+  ride=newSparks.find((s)=>s.to)||newSparks[0]||null;}
+// thought bubbles: glass, glowing in the region's colour, rising from the neuron that fired, typing her words in
+const bubbles=[];
+function bubble(region,kind,text,p){if(bubbles.length>=4){const old=bubbles.shift();old.el.remove();}const el=document.createElement('div');el.className='bub';el.style.setProperty('--c',css(`--c-${region}`));
+  el.innerHTML='<span class="kind"></span><span class="txt"></span><span class="dot3"></span>';el.querySelector('.kind').textContent=kind||REGIONS[region]?.label||'';labelBox.append(el);
+  const full=String(text).replace(/\s+/g,' ').trim();const shown=full.length>170?full.slice(0,167)+'…':full;
+  bubbles.push({el,p,t:0,life:Math.min(11,5+shown.length/28),shown,typed:0,seed:Math.random()*6.28});}
+function drawBubbles(dt){const r=canvas.getBoundingClientRect(),v=new THREE.Vector3();
+  bubbles.forEach((b,i)=>{b.t+=dt;if(b.t>b.life){b.el.remove();b.dead=true;return;}
+    const n=Math.min(b.shown.length,Math.floor(b.t*55));if(n!==b.typed){b.typed=n;b.el.querySelector('.txt').textContent=b.shown.slice(0,n);if(n===b.shown.length)b.el.classList.add('done');}
+    v.set(...b.p).project(camera);if(v.z>1){b.el.style.opacity='0';return;}
+    const x=(v.x*0.5+0.5)*r.width,y=(-v.y*0.5+0.5)*r.height;const rise=18+b.t*7+Math.sin(b.t*1.3+b.seed)*3;const stack=(bubbles.length-1-i)*10;
+    const s=b.t<0.35?0.6+0.4*(b.t/0.35):1;b.el.style.transform=`translate(${x}px,${y}px) translate(-50%,-100%) translate(0,${-rise-stack}px) scale(${s})`;
+    b.el.style.opacity=b.t>b.life-0.8?String(Math.max(0,(b.life-b.t)/0.8)):'1';});
+  for(let i=bubbles.length-1;i>=0;i--)if(bubbles[i].dead)bubbles.splice(i,1);}
+// close up: the names of what she knows around where the camera is looking
+const detPool=[];
+function drawDetails(){const r=canvas.getBoundingClientRect(),v=new THREE.Vector3();const close=dist<1.9;let shown=0;
+  if(close){const near=[];for(const it of itemList){const [x,y,z]=P(it);const d=(x-look.x)**2+(y-look.y)**2+(z-look.z)**2;if(d<0.3)near.push([d,it]);}near.sort((a,b)=>a[0]-b[0]);
+    for(const [d,it] of near.slice(0,12)){v.set(...P(it)).project(camera);if(v.z>1)continue;let el=detPool[shown];if(!el){el=document.createElement('div');el.className='det';labelBox.append(el);detPool.push(el);}
+      if(el.textContent!==it.label)el.textContent=it.label;el.style.setProperty('--c',css(`--c-${it.region}`));el.style.left=`${(v.x*0.5+0.5)*r.width}px`;el.style.top=`${(-v.y*0.5+0.5)*r.height+12}px`;el.style.opacity=String(Math.max(0.15,1-d/0.3)*(1.9-dist)/0.9);shown++;}}
+  for(let i=shown;i<detPool.length;i++)detPool[i].style.opacity='0';}
+function resize(){const r=canvas.parentElement.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix();mind.setScale((r.height/150)*renderer.getPixelRatio());fw.setScale((r.height/150)*renderer.getPixelRatio());}
+addEventListener('resize',resize);resize();
+let last=performance.now();
+function loop(now){const dt=Math.min(0.1,(now-last)/1000);last=now;
+  if(focus&&now>focus.until){focus=null;ride=null;document.getElementById('focusline').classList.remove('on');}
+  // where to look: the bolt as it travels, then where it landed; the whole brain when nothing's going on
+  if(ride&&sparks.includes(ride)&&ride.path)wantLook.set(...alongPath(ride.path,ride.t));else{ride=null;if(focus)wantLook.set(...focus.p);else wantLook.set(0,0,0);}
+  const want=(focus?focus.close:FAR)*zoomBias;
+  const k1=1-Math.exp(-dt*(ride?3.2:1.8)),k2=1-Math.exp(-dt*1.4);look.lerp(wantLook,k1);dist+=(Math.max(0.45,Math.min(7,want))-dist)*k2;
+  if(auto)yaw+=dt*(focus?0.32:0.12); // circles faster when close, like walking around something
+  camera.position.set(look.x+Math.sin(yaw)*Math.cos(pitch)*dist,look.y+Math.sin(pitch)*dist+0.1*Math.min(1,dist/FAR),look.z+Math.cos(yaw)*Math.cos(pitch)*dist);camera.lookAt(look);
+  camera.near=Math.max(0.02,dist*0.04);camera.updateProjectionMatrix();
+  mind.update(dt);fw.update(dt);projectLabels(dt);renderer.render(scene,camera);drawBubbles(dt);drawPops(dt);drawDetails();drawWave('w1',wave.w1,css('--c-hearing'),'w1v');drawWave('w2',wave.w2,css('--c-intake'),'w2v');drawWave('w3',wave.w3,css('--c-tools'),'w3v');requestAnimationFrame(loop);}
+// ---------- buckets, waves, hearing, ticker ----------
+const DPR=Math.min(2,devicePixelRatio||1);let snapshot=null,hist={};const stamps={lines:[],acts:[],fired:[]};let intakeEnergy=[];const wave={w1:[],w2:[],w3:[]};
+const rate=(arr)=>{const now=Date.now();while(arr.length&&now-arr[0]>60_000)arr.shift();return arr.length;};
+function pushWave(){const now=Date.now();const win=(arr,ms)=>arr.filter((t)=>now-t<ms).length;wave.w1.push(win(stamps.lines,10_000));wave.w3.push(win(stamps.acts,10_000)+win(stamps.fired,10_000)*3);wave.w2.push(intakeEnergy.filter((x)=>now-x.at<10_000).reduce((s,x)=>s+x.v,0));for(const k in wave)if(wave[k].length>160)wave[k].shift();
+  document.getElementById('lpm').textContent=rate(stamps.lines);document.getElementById('tpm').textContent=rate(stamps.acts);document.getElementById('fpm').textContent=rate(stamps.fired);}
+function drawWave(id,data,color,label){const c=document.getElementById(id);const r=c.getBoundingClientRect();if(c.width!==Math.round(r.width*DPR)){c.width=r.width*DPR;c.height=r.height*DPR;}const x=c.getContext('2d');x.setTransform(DPR,0,0,DPR,0,0);x.clearRect(0,0,r.width,r.height);const max=Math.max(1,...data);x.lineWidth=1.6;x.strokeStyle=color;x.shadowBlur=10;x.shadowColor=color;x.beginPath();for(let i=0;i<data.length;i++){const v=data[i]/max;const px=i/159*r.width,py=r.height-5-v*(r.height-12);i?x.lineTo(px,py):x.moveTo(px,py);}x.stroke();x.shadowBlur=0;x.fillStyle=color;x.globalAlpha=.08;x.lineTo(r.width,r.height);x.lineTo(0,r.height);x.fill();x.globalAlpha=1;document.getElementById(label).textContent=data.length?data[data.length-1].toFixed(data===wave.w2?1:0):'';}
+function renderBuckets(){if(!snapshot)return;const feel=new Set(snapshot.feelings||[]);const thr=snapshot.thresholds||{};const keys=Object.keys(snapshot.buckets).sort((a,b)=>(feel.has(a)-feel.has(b))||a.localeCompare(b));const el=document.getElementById('buckets');let html='',group='';
+  for(const k of keys){const v=+snapshot.buckets[k]||0;const isF=feel.has(k);const g=isF?'feelings':'wants';if(g!==group){group=g;html+=`<div class="group">${g}</div>`;}(hist[k]??=[]).push(v);if(hist[k].length>120)hist[k].shift();const fired=snapshot.last_action&&snapshot.last_action.bucket===k&&Date.now()-snapshot.last_action.at<8000;
+    html+=`<div class="bucket ${isF?'feel':''} ${fired?'fired':''}" data-k="${k}"><span class="name" title="${k}">${k.replace(/_/g,' ')}</span><span class="bar"><span class="fill" style="width:${(v*100).toFixed(1)}%"></span>${!isF&&thr[k]!=null?`<span class="thr" style="left:${(thr[k]*100).toFixed(1)}%"></span>`:''}<canvas class="spark"></canvas></span><span class="val">${v.toFixed(2)}</span></div>`;}
+  el.innerHTML=html;for(const row of el.querySelectorAll('.bucket')){const k=row.dataset.k,c=row.querySelector('.spark'),r=c.getBoundingClientRect();c.width=r.width*DPR;c.height=r.height*DPR;const x=c.getContext('2d');x.setTransform(DPR,0,0,DPR,0,0);const d=hist[k];x.strokeStyle='rgba(255,255,255,.35)';x.lineWidth=1;x.beginPath();d.forEach((v,i)=>{const px=i/119*r.width,py=r.height-1-v*(r.height-2);i?x.lineTo(px,py):x.moveTo(px,py);});x.stroke();}
+  document.getElementById('total').textContent=`${snapshot.total} (cap ${snapshot.cap})`;const la=snapshot.last_action;document.getElementById('lastWant').textContent=la?`${la.bucket} ${Math.round((Date.now()-la.at)/60000)} min ago`:'none yet';}
+async function poll(){try{snapshot=await fetch('/api/pressure').then((r)=>r.json());mind.setSnapshot(snapshot);renderBuckets();}catch{}finally{setTimeout(poll,300);}}
+const recentLines=[];
+function tick(e,r){const rows=document.getElementById('rows');const d=document.createElement('div');d.className='ev';d.style.setProperty('--c',`var(--c-${r.at})`);d.innerHTML=`<span class="t">${new Date(e.time).toLocaleTimeString([],{hour12:false})}</span><span class="k">${e.type}</span><span class="m"></span>`;d.querySelector('.m').textContent=r.note||'';rows.prepend(d);while(rows.children.length>33)rows.lastChild.remove();
+  if(e.type==='heard'){stamps.lines.push(e.time);hearLine(e);}
+  if(e.type==='intake'){const v=Object.entries(e).filter(([k,x])=>typeof x==='number'&&k!=='time').reduce((s,[,x])=>s+x,0);intakeEnergy.push({at:e.time,v});intakeEnergy=intakeEnergy.slice(-200);attachChips(e);}
+  if(['tool-call','hands','thought','intuition','reaction','curiosity','remembered','memory','plan','music','search','file','git','feeds','journal','persona','task'].includes(e.type))stamps.acts.push(e.time);
+  if(e.type==='pressure'&&e.fired)stamps.fired.push(e.time);}
+function hearLine(e){const box=document.getElementById('lines');const d=document.createElement('div');d.className='line';d.dataset.speaker=e.speaker;d.innerHTML=`<div class="who"></div><div class="txt"></div><div class="chips"></div>`;d.querySelector('.who').textContent=`${e.speaker} · ${new Date(e.time).toLocaleTimeString([],{hour12:false})}${e.ignored?' · overheard':''}`;d.querySelector('.txt').textContent=e.text||'';box.prepend(d);recentLines.unshift(d);while(box.children.length>10)box.lastChild.remove();recentLines.length=Math.min(recentLines.length,10);}
+function attachChips(e){const d=recentLines.find((x)=>x.dataset.speaker===e.speaker&&!x.dataset.read);if(!d)return;d.dataset.read='1';const chips=d.querySelector('.chips');for(const [k,v] of Object.entries(e)){if(typeof v!=='number'||k==='time')continue;const s=document.createElement('span');s.className='chip'+(['contempt','irritant','yelling','quiet'].includes(k)?' hot':'');s.textContent=`${k.replace(/_/g,' ')} ${v}`;chips.append(s);}}
+// her events: the replayed history seeds quietly and fills the ticker; live ones fire, caption, tick and direct the camera
+function connect(){const conn=document.getElementById('conn'),dot=document.getElementById('dot');
+  listenMind(mind,{onOpen:()=>{conn.textContent='live';dot.style.background='#22c55e';},onError:()=>{conn.textContent='reconnecting';dot.style.background='#ef4444';},
+    onReplay:(e,r)=>tick(e,r),
+    onEvent:(e,r,made,newSparks)=>{cap(REGIONS[r.at].label,r.note);tick(e,r);try{direct(e,r,made,newSparks);}catch(err){console.warn('director',err);}try{celebrate(e,r,made);}catch(err){console.warn('fireworks',err);}}});}
+// ---------- the points game: fireworks, points popping out of her brain, the level-up banner, her score, the boards ----------
+// Only real events: something she learned (a firework where its neuron is), points (a number rising from where they
+// landed, red when they're lost), a level gained (a ring of shells and the banner). Owner, 2026-11-15.
+const CAT_COLOR={knowledge:REGION_COLORS.memory,mind:REGION_COLORS.thoughts,bond:REGION_COLORS.feelings,standing:REGION_COLORS.presence};
+function celebrate(e,r,made){
+  if(e.type==='learned'){const p=made[0]?P(made[0]):H(r.at);fw.burst(p,REGION_COLORS[r.at]||'#fff',{size:e.kind==='fact'?1.2:0.7});}
+  if(e.type==='learn-together'&&e.understood)fw.burst(H('curiosity'),REGION_COLORS.curiosity,{size:1.6});
+  if(e.type==='points'){
+    const region=POINTS_REGION[e.category]??'feelings';
+    // their points rise from their own neuron when she knows them; hers from the region they belong to
+    const theirsAt=e.side==='theirs'&&e.person?itemList.find((it)=>it.region==='hearing'&&it.label===e.person):null;
+    const p=theirsAt?P(theirsAt):H(region);
+    pop(p,e.delta,e.side==='theirs'?`${e.person}: ${e.reason??''}`:`${e.category}: ${e.reason??''}`,CAT_COLOR[e.category]||'#ffd166');
+    if(e.delta>0)fw.burst(p,CAT_COLOR[e.category]||'#ffd166',{size:Math.min(1.6,0.5+e.delta/20),count:e.delta<8?40:null});
+    if(e.leveledUp)levelUp(e.level,e.title);
+    loadScore();}
+  if(e.type==='fact-check'&&e.verdict==='confirmed')fw.burst(H('curiosity'),'#7CFC9A',{size:1});}
+const pops=[];
+function pop(p,delta,why,color){if(pops.length>=8){const o=pops.shift();o.el.remove();}const el=document.createElement('div');el.className='pop'+(delta<0?' loss':'');if(delta>=0)el.style.setProperty('--c',color);
+  el.innerHTML='<span class="num"></span><small></small>';el.querySelector('.num').textContent=`${delta>0?'+':''}${delta}`;el.querySelector('small').textContent=String(why).slice(0,80);labelBox.append(el);pops.push({el,p,t:0,life:2.8,dx:(Math.random()-0.5)*40});}
+function drawPops(dt){const r=canvas.getBoundingClientRect(),v=new THREE.Vector3();
+  for(let i=pops.length-1;i>=0;i--){const q=pops[i];q.t+=dt;if(q.t>q.life){q.el.remove();pops.splice(i,1);continue;}
+    v.set(...q.p).project(camera);if(v.z>1){q.el.style.opacity='0';continue;}const x=(v.x*0.5+0.5)*r.width,y=(-v.y*0.5+0.5)*r.height;
+    const k=q.t/q.life,s=q.t<0.25?0.4+2.4*q.t:1;q.el.style.transform=`translate(${x+q.dx*k}px,${y-20-k*70}px) translate(-50%,-100%) scale(${s})`;q.el.style.opacity=k>0.7?String((1-k)/0.3):'1';}}
+let levelTimer=null;
+function levelUp(level,title){const el=document.getElementById('levelup');document.getElementById('levelupText').textContent=`LEVEL ${level}`;document.getElementById('levelupTitle').textContent=title||'';el.classList.add('on');clearTimeout(levelTimer);levelTimer=setTimeout(()=>el.classList.remove('on'),4200);
+  fw.finale([0,0.2,0],[CAT_COLOR.knowledge,'#ffd166',CAT_COLOR.bond,'#ff8fab',CAT_COLOR.mind,'#ffffff']);}
+// her score and the leaderboards, from the server (/api/score); refreshed on every points event and now and then
+let board='overall',boards=[];
+async function loadScore(){try{const s=await fetch('/api/score').then((r)=>r.json());if(s.error)return;
+  document.getElementById('lvl').textContent=s.level;document.getElementById('lvlTitle').textContent=s.title;document.getElementById('xp').textContent=s.xp;
+  document.getElementById('xpFill').style.width=`${Math.max(0,Math.min(100,(s.xp-s.levelAt)/Math.max(1,s.nextAt-s.levelAt)*100))}%`;
+  document.getElementById('cKnowledge').textContent=s.her.knowledge;document.getElementById('cMind').textContent=s.her.mind;document.getElementById('cBond').textContent=s.her.bond;document.getElementById('cStanding').textContent=s.her.standing;
+  boards=s.leaderboards||[];renderBoard();}catch{}}
+function renderBoard(){const tabs=document.getElementById('boardTabs');tabs.innerHTML='';for(const b of boards){const t=document.createElement('button');t.textContent=b.label;t.classList.toggle('on',b.id===board);t.onclick=()=>{board=b.id;renderBoard();};tabs.append(t);}
+  const b=boards.find((x)=>x.id===board)||boards[0];const rows=document.getElementById('boardRows');rows.innerHTML='';
+  if(!b||!b.rows.length){rows.innerHTML='<div class="empty">nobody on this board yet</div>';return;}
+  b.rows.slice(0,8).forEach((row,i)=>{const d=document.createElement('div');d.className='row'+(row.value<0?' neg':'');d.innerHTML='<span class="n"></span><span class="who"></span><span class="v"></span>';d.querySelector('.n').textContent=i+1;d.querySelector('.who').textContent=row.name;d.querySelector('.v').textContent=`${row.value} ${b.unit}`;rows.append(d);});}
+loadScore();setInterval(loadScore,15000);
+// her voice steering this page (mind-view.js): follow / orbit, bigger, fly to a part of her mind or something she knows,
+// zoom, turn, spin, reset
+function steer(c){if(!c)return;
+  if(c.mode)setMode(c.mode);
+  if(c.big!==undefined&&gridEl.classList.contains('big')!==c.big)toggleBig();
+  if(c.reset){focus=null;ride=null;zoomBias=1;pitch=0.12;auto=true;document.getElementById('focusline').classList.remove('on');}
+  if(c.spin!==undefined)auto=c.spin;
+  if(c.zoom)zoomBias=Math.max(0.35,Math.min(2.2,zoomBias*(c.zoom<0?0.72:1.38)**(c.steps||1)));
+  if(c.turn){const s=(c.steps||1)*0.45;if(c.turn==='left')yaw-=s;else if(c.turn==='right')yaw+=s;else pitch=Math.max(-1.2,Math.min(1.2,pitch+(c.turn==='up'?s:-s)*0.6));}
+  if(c.focus){const q=String(c.focus).toLowerCase().trim();const k=KEYS.find((x)=>x===q||REGIONS[x].label.toLowerCase()===q);
+    if(k){focusOn(H(k),REGIONS[k].label,css(`--c-${k}`),30000,1.4);fireRegion(k,0.7);}
+    else{const it=itemList.filter((i)=>i.label.toLowerCase().includes(q)).sort((a,b)=>b.count-a.count)[0];
+      if(it){focusOn(P(it),`${REGIONS[it.region].label} · ${it.label}`,css(`--c-${it.region}`),30000,0.75);iact[it.idx]=1.6;for(const j of it.links)iact[j]=Math.max(iact[j],0.9);}
+      else bubble('thoughts','not found',`nothing in her mind called "${c.focus}" yet`,[0,0.2,0]);}}}
+// ---------- her body, live: the Studio stream; mind-brain.js beats the body cluster with her mouth, blinks and expressions ----------
+function liveBody(){const es=new EventSource('/api/avatar/live?page=mind');let primed=false;es.onopen=()=>{primed=false;setTimeout(()=>primed=true,900);};es.onmessage=(m)=>{let e;try{e=JSON.parse(m.data);}catch{return;}
+  if(e.type==='mind-view'){steer(e.cmd);return;}
+  mind.body(e,primed);};}
+liveBody();
+setInterval(pushWave,500);poll();connect();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

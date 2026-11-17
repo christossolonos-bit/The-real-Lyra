@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra</title>
+<style>
+  :root{ --bg:#03070b; --panel:rgba(8,16,22,.82); --line:#173040; --text:#d9eef5; --muted:#7c9aa6; --cyan:#3fe0ff; --cyan2:#0f6f86; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.45 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  #avatar{position:fixed;inset:0;width:100%;height:100%;border:0}
+  #top{position:fixed;left:18px;top:14px;display:flex;align-items:center;gap:12px}
+  #top h1{margin:0;font-size:18px;letter-spacing:.3em;color:var(--cyan);font-weight:600}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted)}
+  .chip b{color:var(--text);font-weight:600}
+  #log{position:fixed;right:16px;top:14px;bottom:96px;width:min(380px,40vw);overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:4px;mask-image:linear-gradient(transparent,#000 60px)}
+  .msg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;max-width:92%}
+  .msg.me{align-self:flex-end;border-color:#244a5a}
+  .msg.lyra{align-self:flex-start;border-color:#1d5566}
+  .msg .who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+  .msg.note{align-self:center;background:none;border:none;color:var(--muted);font-size:12px;font-style:italic;padding:0}
+  #bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);width:min(720px,calc(100vw - 32px));display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px}
+  #bar input{flex:1;background:transparent;border:0;color:var(--text);font:inherit;padding:8px;outline:none}
+  button{background:#0a141b;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--cyan2)}
+  button.on{background:var(--cyan2);border-color:var(--cyan)}
+  #mic{width:46px;height:42px;font-size:18px;padding:0}
+  #mic.listening{background:#0e7a92;border-color:var(--cyan);box-shadow:0 0 18px #3fe0ff88}
+  #heard{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);color:var(--muted);font-style:italic;font-size:14px;max-width:80vw;text-align:center}
+  #gate{position:fixed;inset:0;display:grid;place-items:center;background:rgba(3,7,11,.75);backdrop-filter:blur(4px);z-index:5}
+  #gate .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;width:min(380px,90vw);text-align:center}
+  #gate h2{margin:0 0 6px;letter-spacing:.3em;color:var(--cyan);font-weight:600}
+  #gate p{color:var(--muted);margin:0 0 14px}
+  #gate input{width:100%;background:#0a141b;border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit;padding:10px;margin-bottom:10px}
+  #gate button{width:100%;padding:10px;background:var(--cyan2);border-color:var(--cyan)}
+  #status{color:var(--muted);font-size:12px;min-width:70px;text-align:right}
+  @media (max-width:700px){ #log{width:auto;left:16px;top:56px;bottom:150px} }
+</style>
+</head>
+<body>
+<iframe id="avatar" src="/creator/?embed=1&view=full" title="Lyra"></iframe>
+<div id="top"><h1>LYRA</h1><span class="chip" id="moodChip">feeling <b>calm</b></span><span class="chip" id="whoChip"></span></div>
+<div id="log" aria-live="polite"></div>
+<div id="heard"></div>
+<div id="bar">
+  <button id="mic" title="PC microphone on/off">🎙</button>
+  <input id="text" placeholder="Just talk (PC mic), or type here…" autocomplete="off">
+  <button id="send">Send</button>
+  <span class="chip" id="earsChip">mic: starting…</span>
+  <button id="view" title="Full body / close-up">Close-up</button>
+  <button id="dash" title="Open Lyra's dashboard (Discord and more) in its own window">Dashboard</button>
+  <span id="status"></span>
+</div>
+<div id="gate"><div class="card">
+  <h2>LYRA</h2>
+  <p id="gateText">Who's there?</p>
+  <input id="gateName" placeholder="Your name" maxlength="24">
+  <button id="wake">Wake her up</button>
+</div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+// ---- who is talking ----
+const params = new URLSearchParams(location.search);
+if (params.get('owner')) { store.set('lyra-owner', params.get('owner')); history.replaceState(null, '', location.pathname); }
+const ownerKey = store.get('lyra-owner') || '';
+let me = { name: store.get('lyra-name') || '', isOwner: false };
+
+async function api(path, body = {}) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, name: me.name, ownerKey }) });
+  return r.json();
+}
+
+// ---- her body (the creator page in embed mode) ----
+const lyraBody = () => $('avatar').contentWindow?.__lyra?.body;
+
+// ---- log ----
+function add(kind, text, who) {
+  const d = document.createElement('div'); d.className = `msg ${kind}`;
+  if (who) { const w = document.createElement('div'); w.className = 'who'; w.textContent = who; d.append(w); }
+  d.append(document.createTextNode(text)); $('log').append(d); $('log').scrollTop = 1e9;
+}
+const status = (t) => { $('status').textContent = t; };
+
+// ---- her voice ----
+const audio = new Audio(); audio.crossOrigin = 'anonymous';
+let actx, analyser, levelBuf, speaking = false;
+function setupAudio() {
+  if (actx) return;
+  actx = new AudioContext(); analyser = actx.createAnalyser(); analyser.fftSize = 512;
+  const src = actx.createMediaElementSource(audio); src.connect(analyser); analyser.connect(actx.destination);
+  levelBuf = new Uint8Array(analyser.fftSize);
+  (function tick() { requestAnimationFrame(tick); if (!speaking) return;
+    analyser.getByteTimeDomainData(levelBuf); let s = 0; for (const v of levelBuf) s += (v - 128) ** 2;
+    lyraBody()?.level(Math.min(1, Math.sqrt(s / levelBuf.length) / 40)); })();
+}
+// tell the server when her voice plays, so the PC mic never hears her
+const tellSpeaking = (on) => fetch('/api/speaking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) }).catch(() => {});
+audio.onplay = () => { speaking = true; lyraBody()?.speaking(true); tellSpeaking(true); };
+audio.onended = audio.onpause = audio.onerror = () => {
+  if (!speaking) return; speaking = false; lyraBody()?.speaking(false); lyraBody()?.level(0);
+  tellSpeaking(false); lastActivity = Date.now();
+};
+
+// ---- her answer arrives (from typing, or from the PC mic via live events) ----
+function handleReply(r) {
+  if (r.error) { add('note', r.error === 'busy' ? 'She is still answering.' : `Something went wrong: ${r.error}`); return; }
+  if (r.mood) { $('moodChip').innerHTML = `feeling <b>${r.mood}</b>`; lyraBody()?.mood(r.mood, r.state?.strength ?? .5); }
+  if (r.gesture) lyraBody()?.gesture(r.gesture);
+  if (r.speech) add('lyra', r.speech, 'Lyra');
+  for (const f of r.remembered || []) add('note', `Lyra will remember: ${f}`);
+  if (r.grew && me.isOwner) add('note', `Lyra is changing: ${r.grew}`);
+  if (r.voiceError) add('note', `(voice failed: ${r.voiceError})`);
+  if (r.audio) { audio.src = r.audio; audio.play().catch(() => {}); }
+}
+
+// ---- one typed turn ----
+let busy = false;
+async function exchange(path, body = {}, showUser) {
+  if (busy) return; busy = true; status('thinking…'); lyraBody()?.think(true); if (showUser) add('me', showUser, me.isOwner ? 'Chris' : me.name);
+  lastActivity = Date.now();
+  try { const r = await api(path, body); handleReply(r); return r; }
+  catch (e) { add('note', `Couldn't reach Lyra: ${e.message}`); }
+  finally { busy = false; status(''); lyraBody()?.think(false); lastActivity = Date.now(); }
+}
+function sendText(t) { t = t.trim(); if (!t) return; $('text').value = ''; $('heard').textContent = ''; exchange('/api/talk', { text: t }, t); }
+$('send').onclick = () => sendText($('text').value);
+$('text').onkeydown = (e) => { if (e.key === 'Enter') sendText($('text').value); };
+
+// ---- the PC microphone (ears/ears.py hears and transcribes on this computer) ----
+let listening = false, micOn = true, earsUp = false, hearing = '';
+function earsChip() {
+  const c = $('earsChip');
+  if (!earsUp) c.innerHTML = 'mic: <b>ears not running</b>';
+  else if (!micOn) c.innerHTML = 'mic: <b>off</b>';
+  else if (hearing === 'hearing') c.innerHTML = 'mic: <b>hearing you…</b>';
+  else if (hearing === 'transcribing') c.innerHTML = 'mic: <b>…</b>';
+  else c.innerHTML = 'mic: <b>listening</b>';
+  $('mic').classList.toggle('listening', earsUp && micOn);
+}
+$('mic').onclick = async () => {
+  const r = await fetch('/api/mic', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !micOn }) }).then(r => r.json()).catch(() => null);
+  if (r) { micOn = r.micOn; earsChip(); }
+};
+function connectEvents() {
+  const ev = new EventSource('/api/events');
+  ev.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'ears') { earsUp = m.connected; micOn = m.micOn; earsChip(); }
+    if (m.type === 'ears-activity') { hearing = m.state; lastActivity = Date.now(); earsChip(); lyraBody()?.listen(m.state === 'hearing' || m.state === 'transcribing'); }
+    if (m.type === 'heard') { hearing = ''; earsChip(); lyraBody()?.listen(false); if (awake) { add('me', m.text, m.who); status('thinking…'); busy = true; lyraBody()?.think(true); lastActivity = Date.now(); } }
+    if (m.type === 'discord' && awake) {
+      if (m.text) add('me', m.text, `${m.who} · Discord${m.voiceCall ? ' voice' : ''}`);
+      if (m.speech) add('lyra', m.speech, 'Lyra · Discord');
+      if (m.mood) { $('moodChip').innerHTML = `feeling <b>${m.mood}</b>`; lyraBody()?.mood(m.mood, m.state?.strength ?? .5); }
+      if (m.gesture) lyraBody()?.gesture(m.gesture);
+      for (const f of m.remembered || []) add('note', `Lyra will remember: ${f}`);
+    }
+    if (m.type === 'reply') { busy = false; status(''); lyraBody()?.think(false); lastActivity = Date.now(); if (awake) handleReply(m); }
+  };
+  ev.onerror = () => { earsUp = false; earsChip(); };
+}
+connectEvents();
+
+$('dash').onclick = () => window.open('http://127.0.0.1:3010/', 'lyra-dashboard', 'width=1280,height=880');
+let close = false;
+$('view').onclick = () => { close = !close; $('avatar').contentWindow.__lyra?.setView(close ? 'upper' : 'full'); $('view').textContent = close ? 'Full body' : 'Close-up'; };
+
+// ---- her own initiative: after a quiet spell she may speak first ----
+let lastActivity = Date.now(), quietWait = 0, awake = false;
+function nextQuiet() { quietWait = (me.isOwner ? 4 : 3) * 60000 + Math.random() * 4 * 60000; }
+setInterval(async () => {
+  if (!awake || busy || speaking || listening || document.hidden) return;
+  if (Date.now() - lastActivity < quietWait) return;
+  const mins = Math.round((Date.now() - lastActivity) / 60000);
+  const r = await exchange('/api/idle', { quietMinutes: mins });
+  // if she chose to stay quiet, wait longer before offering her another moment
+  quietWait = r?.quiet && !r.speech ? Math.min(quietWait * 2, 40 * 60000) : quietWait; if (!r?.quiet) nextQuiet();
+}, 15000);
+
+// ---- wake up ----
+(async () => {
+  const w = await api('/api/whoami');
+  me.isOwner = w.isOwner;
+  if (me.isOwner) { $('gateText').textContent = 'Welcome back, Chris.'; $('gateName').style.display = 'none'; $('whoChip').textContent = 'private · Chris'; }
+  else { $('gateName').value = me.name; $('whoChip').textContent = 'visitor'; }
+})();
+$('wake').onclick = async () => {
+  if (!me.isOwner) {
+    const n = $('gateName').value.trim(); if (!n) { $('gateName').focus(); return; }
+    me.name = n; store.set('lyra-name', n); $('whoChip').textContent = `visitor · ${n}`;
+  }
+  setupAudio(); actx.resume(); $('gate').remove(); awake = true; nextQuiet();
+  await exchange('/api/hello');
+};
+$('gateName').onkeydown = (e) => { if (e.key === 'Enter') $('wake').click(); };
+</script>
+</body>
+</html>

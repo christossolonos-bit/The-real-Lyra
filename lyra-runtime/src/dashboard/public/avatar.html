@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Studio</title>
+<script>if (new URLSearchParams(location.search).has('pip')) document.documentElement.classList.add('pip');</script>
+<style>
+  :root {
+    --bg-1: #1b1d2a; --bg-2: #0c0d13; --glass: rgba(22, 23, 31, .72); --glass-2: rgba(255, 255, 255, .06);
+    --text: #ececf1; --muted: #9a9aa6; --border: rgba(255, 255, 255, .09);
+    --accent: #7983ff; --accent-text: #fff; --good: #3ecf7a; --bad: #ff6b6b; --warn: #f0b44c;
+    --bubble: rgba(255, 255, 255, .07); --shadow: 0 10px 40px rgba(0, 0, 0, .35);
+    --radius: 16px;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg-1: #f3f3f8; --bg-2: #d9dbe6; --glass: rgba(255, 255, 255, .78); --glass-2: rgba(0, 0, 0, .04);
+      --text: #18181b; --muted: #62626d; --border: rgba(0, 0, 0, .09);
+      --accent: #5865f2; --good: #1f9d55; --bad: #d33a3a; --warn: #c27c0e;
+      --bubble: rgba(0, 0, 0, .05); --shadow: 0 10px 40px rgba(30, 30, 60, .15);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: radial-gradient(ellipse 70% 60% at 40% 38%, var(--bg-1), var(--bg-2));
+  }
+  body[data-backdrop="dusk"] { background: radial-gradient(ellipse 80% 70% at 40% 30%, #3a2c4f, #120d1c 70%); }
+  body[data-backdrop="day"] { background: linear-gradient(#cfd9ea, #eef0f5 70%); }
+  body[data-backdrop="day"] .caption span { color: #fff; }
+  button { font: inherit; color: inherit; }
+
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  /* Picture-in-picture (?pip=1): just her — used by the theater seat and other embeds. */
+  html.pip body > :not(#stage):not(script),
+  body.pip > :not(#stage):not(script) { display: none !important; }
+  html.pip, html.pip body, body.pip { background: transparent; }
+  /* Recorder mode (?recorder=1): just her face; the page exists to record video replies. */
+  body.recorder > :not(#stage):not(#recorderBar):not(script) { display: none !important; }
+  #recorderBar { position: fixed; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.6); color: #fff; font: 13px system-ui, sans-serif; cursor: pointer; z-index: 10; }
+  #recorderBar.rec::before { content: '● '; color: #ff4d4d; }
+  .glow { position: fixed; left: calc((100% - var(--panel-w)) / 2); bottom: 2%; width: 420px; height: 90px; transform: translateX(-50%);
+    background: radial-gradient(ellipse at center, rgba(121, 131, 255, .18), transparent 70%); pointer-events: none; }
+
+  /* Top bar */
+  .topbar { position: fixed; top: 16px; left: 16px; right: calc(var(--panel-w) + 32px); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; z-index: 3; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 99px; background: var(--glass); border: 1px solid var(--border);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .chip b { color: var(--text); font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .chip.title { font-size: 15px; padding: 6px 14px; color: var(--text); font-weight: 600; text-decoration: none; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.good { background: var(--good); } .dot.bad { background: var(--bad); } .dot.busy { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  a.chip:hover { color: var(--text); }
+  .chip.cast { padding: 3px; gap: 2px; }
+  .chip.cast button { background: none; border: 0; padding: 3px 11px; border-radius: 99px; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+  .chip.cast button:hover { color: var(--text); }
+  .chip.cast button.on { background: var(--accent); color: var(--accent-text); }
+  .chip.turn { max-width: min(420px, 46vw); gap: 8px; }
+  .chip.turn[hidden] { display: none !important; }
+  .chip.turn .turn-steps { overflow: hidden; text-overflow: ellipsis; color: var(--text); font-size: 11px; }
+  .chip.turn .turn-steps b { color: #c4b5fd; font-weight: 600; margin-right: 2px; }
+  .caption span b { font-weight: 700; margin-right: 4px; opacity: .85; }
+  .feel.who { justify-content: center; color: var(--muted); font-weight: 600; min-width: 0; }
+  .char-edit { padding: 6px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+  .char-edit:last-child { border-bottom: 0; }
+  .char-edit .persona-label { display: block; margin: 6px 0 4px; }
+  .char-edit textarea { width: 100%; resize: vertical; min-height: 80px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--glass-2); color: var(--text); font: inherit; font-size: 13px; }
+  .save-char { margin-top: 8px; width: 100%; padding: 7px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-text); cursor: pointer; font: inherit; font-weight: 600; }
+
+  /* Caption */
+  .caption { position: fixed; left: 16px; right: calc(var(--panel-w) + 32px); bottom: 92px; text-align: center; pointer-events: none; z-index: 2; }
+  .caption span { display: inline-block; max-width: 640px; padding: 8px 16px; border-radius: 12px; background: rgba(0, 0, 0, .55); color: #fff;
+    font-size: 17px; line-height: 1.45; opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; }
+  .caption.show span { opacity: 1; transform: none; }
+
+  /* Bottom dock */
+  .dock { position: fixed; left: 16px; right: calc(var(--panel-w) + 32px); bottom: 20px; display: flex; justify-content: center; z-index: 3; pointer-events: none; }
+  .dock-inner { display: flex; gap: 4px; align-items: center; padding: 6px; border-radius: 99px; background: var(--glass); border: 1px solid var(--border);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--shadow); pointer-events: auto; flex-wrap: wrap; justify-content: center; }
+  .seg { display: flex; gap: 2px; }
+  .dock button { background: none; border: 0; padding: 7px 11px; white-space: nowrap; border-radius: 99px; cursor: pointer; color: var(--muted); font-size: 13px; }
+  .dock button:hover { background: var(--glass-2); color: var(--text); }
+  .dock button.on { background: var(--accent); color: var(--accent-text); }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+  .dock { flex-direction: column; align-items: center; }
+  .feelings { display: flex; gap: 8px; padding: 0 6px; min-width: 0; align-items: center; }
+  .feelings .feel.act {
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #c4b5fd; font-weight: 500; opacity: 0.95;
+  }
+  .feelings .feel.act::before { content: "· "; opacity: 0.6; }
+  .feel { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text); text-transform: capitalize; min-width: 46px; }
+
+  /* 3D brain activity panel — neural plexus */
+  .brain-panel {
+    position: fixed; top: 64px; right: calc(var(--panel-w) + 28px); width: min(520px, calc(100vw - var(--panel-w) - 40px));
+    height: min(620px, calc(100vh - 100px)); z-index: 5; display: flex; flex-direction: column; isolation: isolate;
+    border-radius: var(--radius); background: linear-gradient(165deg, rgba(0, 0, 0, .96), rgba(8, 6, 16, .95));
+    border: 1px solid rgba(30, 27, 55, .8);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .brain-panel[hidden] { display: none !important; }
+  .brain-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.06); position: relative; z-index: 2; }
+  .brain-head h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; color: #e2e8f0; }
+  .brain-head .hint { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: 8px; }
+  .brain-canvas { flex: 1; width: 100%; min-height: 280px; display: block; touch-action: none; background: radial-gradient(ellipse at 50% 42%, #0a0a12 0%, #000000 72%); }
+  .brain-hud { position: absolute; inset: 44px 0 120px 0; pointer-events: none; z-index: 1; }
+  .brain-status { position: absolute; left: 14px; top: 8px; max-width: 55%; }
+  .brain-quiet { font-size: 28px; font-weight: 600; letter-spacing: -0.03em; color: #e2e8f0; line-height: 1.1; text-shadow: 0 2px 12px rgba(0,0,0,.5); }
+  .brain-quiet.hot { color: #f0abfc; }
+  .brain-sub { font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.35; }
+  .brain-legend {
+    position: absolute; right: 10px; top: 4px; margin: 0; padding: 0; list-style: none;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; font-size: 10px; color: #cbd5e1;
+    max-height: 70%; overflow: hidden;
+  }
+  .brain-legend li { display: flex; align-items: center; gap: 5px; white-space: nowrap; opacity: .55; transition: opacity .2s, color .2s; }
+  .brain-legend li.on { opacity: 1; color: #f8fafc; }
+  .brain-legend i { width: 7px; height: 7px; border-radius: 50%; flex: none; box-shadow: 0 0 6px currentColor; }
+  .brain-log b { color: #e2e8f0; font-weight: 600; margin-right: 4px; }
+  .brain-foot { position: absolute; left: 14px; bottom: 6px; font-size: 10px; color: #64748b; }
+  .brain-log { max-height: 120px; overflow: auto; padding: 8px 12px 12px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; position: relative; z-index: 2; background: rgba(2,6,23,.65); }
+  .brain-log .spark-row { padding: 3px 0; color: #c4b5fd; border-bottom: 1px solid rgba(255,255,255,.04); display: flex; align-items: center; gap: 7px; }
+  .brain-log .spark-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; box-shadow: 0 0 8px currentColor; }
+  .brain-log .spark-row.word { color: #7dd3fc; }
+  .brain-log .spark-row.feel { color: #f9a8d4; }
+  .brain-log .spark-row.speak { color: #fb7185; }
+  .brain-log .spark-row.tool { color: #fcd34d; }
+  .brain-log .spark-row.think { color: #c4b5fd; }
+  @media (max-width: 900px) {
+    .brain-panel { left: 12px; right: 12px; width: auto; top: 56px; height: min(70vh, 560px); }
+    .brain-legend { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 1100px) { .feelings .feel:nth-child(n+4) { display: none; } } /* keep the dock on one row */
+  .feel.calm { color: var(--muted); justify-content: center; }
+  .feel i { display: block; height: 3px; border-radius: 99px; background: var(--border); position: relative; overflow: hidden; }
+  .feel i::after { content: ''; position: absolute; inset: 0; width: calc(var(--v) * 100%); background: var(--accent); border-radius: inherit; transition: width .6s; }
+  .expr-panel { order: -1; margin-bottom: 10px; width: min(520px, 100%); padding: 14px; border-radius: var(--radius); background: var(--glass); border: 1px solid var(--border);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: var(--shadow); pointer-events: auto; }
+  .expr-panel h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .expr-panel h4 span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .expr-panel .grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .expr-panel .grid button, .calm-btn { border: 1px solid var(--border); background: var(--glass-2); color: var(--text); border-radius: 99px; padding: 5px 11px;
+    cursor: pointer; font-size: 13px; text-transform: capitalize; }
+  .expr-panel .grid button:hover, .calm-btn:hover { border-color: var(--accent); }
+  .calm-btn { width: 100%; border-radius: 10px; }
+
+  /* Full character customization */
+  .custom-panel {
+    position: fixed; top: 64px; left: 16px; width: min(380px, calc(100vw - var(--panel-w) - 40px));
+    max-height: calc(100vh - 150px); z-index: 5; display: flex; flex-direction: column;
+    border-radius: var(--radius); background: linear-gradient(165deg, rgba(16, 16, 24, .96), rgba(10, 10, 16, .94));
+    border: 1px solid var(--border); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .custom-panel[hidden] { display: none !important; }
+  .custom-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .custom-head h3 { margin: 0; flex: 1; font-size: 14px; font-weight: 600; }
+  .custom-head .hint { color: var(--muted); font-size: 11px; font-weight: 400; }
+  .custom-body { overflow: auto; padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .custom-sec h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .custom-row { display: grid; grid-template-columns: 88px 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  .custom-row label { color: var(--text); }
+  .custom-row input[type="color"] { width: 36px; height: 28px; border: 1px solid var(--border); border-radius: 8px; background: none; padding: 0; cursor: pointer; }
+  .custom-row input[type="range"] { width: 100%; }
+  .custom-row select { width: 100%; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--glass-2); color: var(--text); font: inherit; }
+  .custom-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .custom-presets button {
+    border: 1px solid var(--border); background: var(--glass-2); color: var(--text); border-radius: 99px;
+    padding: 5px 11px; cursor: pointer; font-size: 12px;
+  }
+  .custom-presets button:hover, .custom-presets button.on { border-color: var(--accent); background: rgba(121, 131, 255, .18); }
+  .custom-actions { display: flex; gap: 8px; padding-top: 4px; }
+  .custom-actions button {
+    flex: 1; padding: 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--glass-2);
+    color: var(--text); cursor: pointer; font: inherit; font-weight: 600; font-size: 13px;
+  }
+  .custom-actions button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+  @media (max-width: 900px) {
+    .custom-panel { left: 12px; right: 12px; width: auto; top: 56px; max-height: min(70vh, 560px); }
+  }
+
+  /* Side panel */
+  :root { --panel-w: 400px; }
+  body.collapsed { --panel-w: 0px; }
+  .panel { position: fixed; top: 16px; right: 16px; bottom: 16px; width: var(--panel-w); display: flex; flex-direction: column; z-index: 4;
+    background: var(--glass); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); overflow: hidden; transition: width .25s; }
+  body.collapsed .panel { width: 0; border: 0; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; }
+  .icon-btn { background: none; border: 0; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; color: var(--muted); display: grid; place-items: center; }
+  .icon-btn:hover { background: var(--glass-2); color: var(--text); }
+  .icon-btn svg { width: 18px; height: 18px; }
+  .reopen { position: fixed; top: 16px; right: 16px; z-index: 4; background: var(--glass); border: 1px solid var(--border); backdrop-filter: blur(14px); }
+
+  .log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { max-width: 86%; padding: 9px 13px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bubble .name { display: block; font-size: 11px; font-weight: 700; opacity: .65; margin-bottom: 2px; letter-spacing: .02em; }
+  .bubble.user { align-self: flex-end; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 4px; }
+  .bubble.assistant { align-self: flex-start; background: var(--bubble); border-bottom-left-radius: 4px; }
+  .bubble.err { align-self: center; background: none; color: var(--bad); font-size: 13px; }
+  .bubble a.file { display: block; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(127,127,127,.15); color: inherit; text-decoration: none; font-weight: 600; }
+  .bubble audio.song { display: block; width: 100%; max-width: 320px; margin-top: 8px; }
+  .bubble img.gen { display: block; width: 100%; max-width: 320px; margin-top: 8px; border-radius: 10px; }
+  .typing { display: inline-flex; gap: 4px; padding: 4px 0; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: bounce 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: none; opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
+  .empty { margin: auto; text-align: center; color: var(--muted); max-width: 260px; }
+  .empty kbd { font: 12px ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; }
+
+  .composer { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { flex: 1; resize: none; min-height: 42px; max-height: 140px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--glass-2); color: var(--text); font: inherit; outline: none; }
+  .composer textarea:focus { border-color: var(--accent); }
+  .round { width: 42px; height: 42px; flex: none; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; position: relative; }
+  .round svg { width: 20px; height: 20px; position: relative; }
+  .send { background: var(--accent); color: var(--accent-text); }
+  .send:disabled { opacity: .45; cursor: default; }
+  .mic { background: var(--glass-2); color: var(--text); border: 1px solid var(--border); }
+  .mic::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 2px solid var(--bad); opacity: 0; transform: scale(var(--lvl, 1)); transition: transform .08s; }
+  .mic.rec { background: var(--bad); color: #fff; border-color: transparent; }
+  .mic.rec::before { opacity: .6; }
+  .mic.armed { border-color: var(--good); color: var(--good); }
+  .mic.working { opacity: .6; cursor: wait; }
+
+  /* Settings */
+  .settings { position: absolute; inset: 57px 0 0 0; background: var(--glass); backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px);
+    overflow-y: auto; padding: 8px 16px 20px; z-index: 2; }
+  .settings h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+  .set { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+  .set label { flex: 1; }
+  .set .hint { display: block; font-size: 12px; color: var(--muted); }
+  .set input[type=text], .set select { width: 150px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--glass-2); color: var(--text); font: inherit; }
+  .set input[type=range] { width: 150px; accent-color: var(--accent); }
+  .switch { appearance: none; -webkit-appearance: none; width: 36px; height: 21px; border-radius: 99px; background: var(--border); position: relative; cursor: pointer; flex: none; transition: background .2s; margin: 0; }
+  .switch::after { content: ''; position: absolute; top: 2.5px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch:checked { background: var(--accent); }
+  .switch:checked::after { transform: translateX(14px); }
+
+  /* Loading + drop */
+  .overlay { position: fixed; inset: 0; right: calc(var(--panel-w) + 16px); display: grid; place-items: center; z-index: 2; pointer-events: none; text-align: center; color: var(--muted); }
+  .bar { width: 220px; height: 4px; border-radius: 99px; background: var(--border); overflow: hidden; margin: 10px auto 0; }
+  .bar div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .drop { position: fixed; inset: 12px; border: 2px dashed var(--accent); border-radius: 20px; z-index: 10; display: grid; place-items: center;
+    background: rgba(20, 20, 40, .55); color: #fff; font-size: 18px; pointer-events: none; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg-2); padding: 9px 16px; border-radius: 10px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; max-width: 90vw; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 760px) {
+    :root { --panel-w: 0px; }
+    .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: 46vh; }
+    body.collapsed .panel { height: 0; width: auto; }
+    .topbar, .caption, .dock { right: 16px; }
+    .topbar { left: 8px; right: 8px; top: 8px; }
+    .caption { bottom: calc(46vh + 70px); }
+    .dock { bottom: calc(46vh + 16px); left: 8px; right: 8px; }
+    body.collapsed .caption { bottom: 80px; }
+    body.collapsed .dock { bottom: 16px; }
+    .glow { display: none; }
+    .overlay { right: 0; bottom: 46vh; }
+    .chip.opt { display: none; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="glow"></div>
+
+<div class="topbar">
+  <a class="chip title" href="/" title="Back to the dashboard">‹ <span id="botName">Companion</span></a>
+  <span class="chip cast" id="castPicker" title="Who you're talking to. You can also name them, or click them." hidden></span>
+  <span class="chip" id="stateChip"><span class="dot" id="stateDot"></span><span id="stateText">Loading</span></span>
+  <span class="chip turn" id="turnChip" hidden title="What this reply actually did"><span class="dot busy" id="turnDot"></span><span class="turn-steps" id="turnSteps"></span></span>
+  <span class="chip opt">Brain <b id="modelName">…</b></span>
+  <span class="chip opt"><span class="dot" id="fishDot"></span>Voice <b id="voiceName">…</b></span>
+</div>
+
+<div class="overlay" id="loading">
+  <div><div id="loadingText">Loading avatar…</div><div class="bar"><div id="loadingBar"></div></div></div>
+</div>
+
+<div class="caption" id="caption"><span id="captionText"></span></div>
+
+<div class="dock">
+  <div class="dock-inner">
+    <div class="seg" id="framing">
+      <button data-frame="face">Face</button>
+      <button data-frame="bust" class="on">Upper body</button>
+      <button data-frame="body">Full body</button>
+    </div>
+    <span class="sep"></span>
+    <div class="feelings" id="feelings" title="How she feels right now"></div>
+    <button id="exprBtn" title="Change how they feel, or play a gesture">Expressions</button>
+    <button id="customBtn" title="Full character customization — hair, skin, clothes">Customize</button>
+    <button id="brainBtn" title="Watch her thoughts spark as neurotransmitter activity">Brain</button>
+    <button id="banterBtn" title="Let them talk to each other on their own, nonstop. Jump in any time; Esc stops it." aria-pressed="false" hidden>Banter</button>
+  </div>
+  <div class="expr-panel" id="exprPanel" hidden>
+    <h4>Make <b id="exprWho">them</b> feel <span>(they'll carry it into the conversation)</span></h4>
+    <div class="grid" id="exprFeelings"></div>
+    <h4>Gestures</h4>
+    <div class="grid" id="exprGestures"></div>
+    <button id="calmBtn" class="calm-btn">Calm down</button>
+  </div>
+</div>
+
+<button class="icon-btn reopen" id="reopen" title="Show chat" hidden>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+</button>
+
+<aside class="panel">
+  <div class="panel-head">
+    <h2 id="panelTitle">Conversation</h2>
+    <button class="icon-btn" id="clearBtn" title="Clear this conversation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+    </button>
+    <button class="icon-btn" id="settingsBtn" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <button class="icon-btn" id="collapseBtn" title="Hide chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+  </div>
+
+  <div class="log" id="log">
+    <div class="empty" id="empty">Say hi. Type below, or hold <kbd>Space</kbd> or the mic button to talk.</div>
+  </div>
+
+  <div class="composer">
+    <button class="round mic" id="micBtn" title="Hold to talk (or hold Space). Click to start and stop.">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg>
+    </button>
+    <textarea id="input" rows="1" placeholder="Message…"></textarea>
+    <button class="round send" id="sendBtn" title="Send" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+
+  <div class="settings" id="settings" hidden>
+    <h3>Characters</h3>
+    <div id="castEditors"></div>
+
+    <h3>You</h3>
+    <div class="set"><label for="optName">Your name<span class="hint">How the companion knows you</span></label><input type="text" id="optName" placeholder="Dashboard"></div>
+
+    <h3>Voice</h3>
+    <div class="set"><label for="optVoice">Speak replies<span class="hint">Fish Audio text-to-speech</span></label><input type="checkbox" class="switch" id="optVoice"></div>
+    <div class="set"><label for="optVolume">Volume</label><input type="range" id="optVolume" min="0" max="1" step="0.05"></div>
+    <div class="set"><label for="optHandsFree">Hands-free mic<span class="hint">PC mic with voice detect — talks when you pause (no hold)</span></label><input type="checkbox" class="switch" id="optHandsFree"></div>
+    <div class="set"><label for="optSubs">Subtitles</label><input type="checkbox" class="switch" id="optSubs"></div>
+
+    <h3>Animation</h3>
+    <div class="set"><label for="optBlink">Blinking</label><input type="checkbox" class="switch" id="optBlink"></div>
+    <div class="set"><label for="optGaze">Eyes follow the pointer</label><input type="checkbox" class="switch" id="optGaze"></div>
+    <div class="set"><label for="optHead">Idle head motion</label><input type="checkbox" class="switch" id="optHead"></div>
+    <div class="set"><label for="optIntensity">Motion intensity</label><input type="range" id="optIntensity" min="0" max="2" step="0.1"></div>
+    <div class="set"><label for="optLips">Lip sync strength</label><input type="range" id="optLips" min="0.3" max="2" step="0.1"></div>
+    <div class="set"><label for="optExpr">Expression strength<span class="hint">How strongly her feelings show</span></label><input type="range" id="optExpr" min="0" max="1.6" step="0.1"></div>
+    <div class="set"><label for="optRest">Resting smile</label><input type="range" id="optRest" min="0" max="1" step="0.05"></div>
+
+    <h3>Scene</h3>
+    <div class="set"><label for="optQuality">Graphics<span class="hint">High adds soft shadows, ambient occlusion, bloom and film grain</span></label>
+      <select id="optQuality"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+    <div class="set"><label for="optBackdrop">Backdrop</label>
+      <select id="optBackdrop"><option value="studio">Studio</option><option value="dusk">Dusk</option><option value="day">Daylight</option></select></div>
+    <h3>Appearance</h3>
+    <p class="hint" style="margin:0 0 8px">Open <b>Customize</b> in the dock for hair strands, skin, face and clothes. Upload a .glb here to swap the model.</p>
+    <div class="set"><label>Model<span class="hint">Saved under data/avatars</span></label>
+      <button class="icon-btn" id="pickGlb" title="Upload a .glb" style="width:auto;padding:0 10px">Upload…</button></div>
+    <div class="set"><label for="optLibrary">Library</label>
+      <select id="optLibrary"><option value="">— choose saved —</option></select></div>
+    <input type="file" id="glbFile" accept=".glb,.gltf,model/gltf-binary" hidden>
+  </div>
+</aside>
+
+<div class="drop" id="drop" hidden>Drop a .glb to save &amp; load it</div>
+<div class="toast" id="toast"></div>
+
+<div class="custom-panel" id="customPanel" hidden>
+  <div class="custom-head">
+    <h3>Customize <span class="hint" id="customWho">character</span></h3>
+    <button type="button" id="customClose" class="icon-btn" title="Close" style="width:auto;padding:4px 10px;border:1px solid var(--border)">Close</button>
+  </div>
+  <div class="custom-body">
+    <div class="custom-sec">
+      <h4>Presets</h4>
+      <div class="custom-presets" id="customPresets"></div>
+    </div>
+    <div class="custom-sec">
+      <h4>Hair</h4>
+      <div class="custom-row"><label for="lookStrands">Strand hair</label><span class="hint" style="grid-column:2">experimental overlay</span><input type="checkbox" class="switch" id="lookStrands"></div>
+      <div class="custom-row"><label for="lookHair">Color</label><span></span><input type="color" id="lookHair" value="#24160e"></div>
+      <div class="custom-row"><label for="lookHairStyle">Style</label>
+        <select id="lookHairStyle">
+          <option value="long" selected>Long</option>
+          <option value="medium">Medium</option>
+          <option value="bob">Bob</option>
+          <option value="short">Short</option>
+          <option value="wavy">Wavy long</option>
+        </select>
+      </div>
+      <div class="custom-row"><label for="lookHairLength">Length</label><input type="range" id="lookHairLength" min="0.5" max="1.8" step="0.05" value="1.15"><span id="lookHairLengthVal">1.15</span></div>
+      <div class="custom-row"><label for="lookHairDensity">Density</label><input type="range" id="lookHairDensity" min="0.5" max="1.4" step="0.05" value="1"><span id="lookHairDensityVal">1.0</span></div>
+    </div>
+    <div class="custom-sec">
+      <h4>Skin &amp; eyes</h4>
+      <div class="custom-row"><label for="lookSkin">Skin</label><span></span><input type="color" id="lookSkin" value="#d9a587"></div>
+      <div class="custom-row"><label for="lookEyes">Eyes</label><span></span><input type="color" id="lookEyes" value="#3f7fb8"></div>
+      <div class="custom-row"><label for="lookBlush">Blush</label><input type="range" id="lookBlush" min="0" max="1" step="0.05" value="0.15"><span id="lookBlushVal">0.15</span></div>
+      <div class="custom-row"><label for="lookLips">Lip tint</label><input type="range" id="lookLips" min="0" max="1" step="0.05" value="0.2"><span id="lookLipsVal">0.20</span></div>
+    </div>
+    <div class="custom-sec">
+      <h4>Face</h4>
+      <div class="custom-row"><label for="lookSmile">Rest smile</label><input type="range" id="lookSmile" min="0" max="1" step="0.05" value="0.35"><span id="lookSmileVal">0.35</span></div>
+      <div class="custom-row"><label for="lookBrows">Brows</label><input type="range" id="lookBrows" min="0" max="1" step="0.05" value="0.1"><span id="lookBrowsVal">0.10</span></div>
+      <div class="custom-row"><label for="lookEyesOpen">Eye openness</label><input type="range" id="lookEyesOpen" min="0" max="1" step="0.05" value="0.15"><span id="lookEyesOpenVal">0.15</span></div>
+    </div>
+    <div class="custom-sec">
+      <h4>Clothes / outfit</h4>
+      <p class="hint" style="margin:0 0 6px">Tint the wardrobe fabric. Navy / Wine / Forest / Cream / Charcoal are also in Presets above.</p>
+      <div class="custom-row"><label for="lookClothes">Color</label><span></span><input type="color" id="lookClothes" value="#4a5568"></div>
+    </div>
+    <div class="custom-sec">
+      <h4>Model</h4>
+      <div class="custom-row"><label>Upload</label><button class="icon-btn" id="customPickGlb" style="width:auto;padding:0 10px;grid-column:2 / -1">Upload .glb…</button></div>
+      <div class="custom-row"><label for="customLibrary">Library</label>
+        <select id="customLibrary" style="grid-column:2 / -1"><option value="">— choose saved —</option></select>
+      </div>
+    </div>
+    <div class="custom-actions">
+      <button type="button" id="customReset">Reset</button>
+      <button type="button" class="primary" id="customSave">Save look</button>
+    </div>
+  </div>
+</div>
+
+<div class="brain-panel" id="brainPanel" hidden>
+  <div class="brain-head">
+    <h3>Neural activity <span class="hint">cortex map · sparks = thoughts</span></h3>
+    <button type="button" id="brainClose" style="padding:4px 10px;border-radius:99px;border:1px solid var(--border);background:var(--glass-2);cursor:pointer;color:var(--muted);font:inherit">Close</button>
+  </div>
+  <canvas class="brain-canvas"></canvas>
+  <div class="brain-log" aria-live="polite"></div>
+</div>
+
+<script type="module" src="/avatar.js"></script>
+</body>
+</html>

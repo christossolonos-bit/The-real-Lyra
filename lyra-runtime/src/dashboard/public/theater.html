@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theater</title>
+<style>
+  :root { --velvet: #6d0f1c; --velvet-dark: #2c060b; --gold: #e8c170; --hall: #07060a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: radial-gradient(ellipse at 50% 38%, #1b1420 0%, var(--hall) 68%); color: #eadfca; font-family: Georgia, 'Times New Roman', serif; overflow: hidden; }
+  /* The curtains: drawn to the sides, folds from repeating gradients. */
+  .curtain { position: fixed; top: 0; bottom: 0; width: 13vw; min-width: 60px; z-index: 2; pointer-events: none;
+    background: repeating-linear-gradient(90deg, var(--velvet-dark) 0, var(--velvet) 22px, #8f1626 34px, var(--velvet) 46px, var(--velvet-dark) 68px);
+    box-shadow: inset 0 -120px 90px -40px rgba(0,0,0,.75), 0 0 60px rgba(0,0,0,.8); }
+  .curtain.left { left: 0; border-bottom-right-radius: 40% 12%; }
+  .curtain.right { right: 0; border-bottom-left-radius: 40% 12%; }
+  .valance { position: fixed; top: 0; left: 0; right: 0; height: 7vh; min-height: 34px; z-index: 3; pointer-events: none;
+    background: repeating-linear-gradient(90deg, var(--velvet-dark) 0, var(--velvet) 30px, #8f1626 46px, var(--velvet) 62px, var(--velvet-dark) 92px);
+    border-bottom: 4px solid var(--gold); box-shadow: 0 10px 30px rgba(0,0,0,.7); }
+  #hall { position: fixed; inset: 7vh 13vw 0 13vw; display: flex; flex-direction: column; align-items: center; padding: 2.2vh 1vw 0; z-index: 1; }
+  #marquee { font-size: clamp(15px, 2.1vh, 24px); letter-spacing: .08em; color: var(--gold); text-shadow: 0 0 14px rgba(232,193,112,.45); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; min-height: 1.4em; }
+  #marquee small { color: #b9a98a; letter-spacing: .02em; font-size: .75em; }
+  /* The screen keeps 16:9 and fills what the hall leaves. */
+  #screen { position: relative; margin-top: 1.4vh; width: min(100%, calc((100vh - 7vh - 36vh) * 16 / 9)); aspect-ratio: 16 / 9; background: #000; border-radius: 4px;
+    box-shadow: 0 0 0 3px #1a1a1f, 0 0 70px 12px rgba(150,170,255,.14), 0 40px 80px rgba(0,0,0,.9); overflow: hidden; }
+  #screen.lit { box-shadow: 0 0 0 3px #1a1a1f, 0 0 110px 26px rgba(170,190,255,.22), 0 40px 80px rgba(0,0,0,.9); }
+  #player, #screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #7d7466; font-size: clamp(14px, 2.2vh, 22px); text-align: center; padding: 0 8%; background: radial-gradient(ellipse at center, #15131a, #050507); }
+  #empty b { color: var(--gold); font-weight: normal; font-size: 1.5em; letter-spacing: .12em; }
+  #start { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.6); color: var(--gold); font-size: 22px; cursor: pointer; z-index: 5; }
+  #state { margin-top: 1.2vh; font-size: clamp(12px, 1.7vh, 17px); color: #b9a98a; min-height: 1.4em; text-align: center; font-family: system-ui, sans-serif; }
+  #state .dot { display: inline-block; width: .7em; height: .7em; border-radius: 50%; background: #555; margin-right: .5em; vertical-align: baseline; }
+  #state.playing .dot { background: #58c777; box-shadow: 0 0 8px #58c777; }
+  #state.paused .dot { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
+  #state.trouble .dot { background: #d9534f; box-shadow: 0 0 8px #d9534f; }
+  /* Paste a YouTube link (or search words) without asking her first. */
+  #put-on { margin-top: 1.1vh; width: min(100%, 720px); display: flex; gap: 8px; align-items: stretch; font-family: system-ui, sans-serif; z-index: 5; }
+  #put-on input { flex: 1; min-width: 0; background: rgba(12,10,16,.88); border: 1px solid rgba(232,193,112,.35); color: #eadfca; border-radius: 4px; padding: 10px 12px; font-size: clamp(13px, 1.7vh, 16px); outline: none; }
+  #put-on input::placeholder { color: #7d7466; }
+  #put-on input:focus { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(232,193,112,.25); }
+  #put-on button { background: var(--velvet); color: var(--gold); border: 1px solid rgba(232,193,112,.55); border-radius: 4px; padding: 0 16px; font-size: clamp(12px, 1.6vh, 15px); letter-spacing: .06em; cursor: pointer; white-space: nowrap; font-family: Georgia, 'Times New Roman', serif; }
+  #put-on button:hover { background: #8f1626; }
+  #put-on button:disabled { opacity: .55; cursor: wait; }
+  #put-msg { margin-top: .4vh; width: min(100%, 720px); min-height: 1.2em; text-align: center; font-family: system-ui, sans-serif; font-size: clamp(11px, 1.5vh, 14px); color: #b9a98a; }
+  #put-msg.err { color: #e08a84; }
+  /* What she hears, as she hears it. */
+  #heard { margin-top: .8vh; width: min(100%, 1100px); padding: 0 calc(min(22vh, 250px) + 12px) 0 8px; font-family: system-ui, sans-serif; font-size: clamp(12px, 1.8vh, 18px); line-height: 1.35; color: #d9cfbb; min-height: 3.2em; }
+  #heard .label { color: #8f8470; font-size: .78em; text-transform: uppercase; letter-spacing: .12em; }
+  #heard .at { color: var(--gold); margin-right: .5em; font-variant-numeric: tabular-nums; }
+  /* The front row, in silhouette, and her seat. */
+  #seats { position: fixed; left: 0; right: 0; bottom: 0; height: 9vh; z-index: 2; pointer-events: none;
+    background: radial-gradient(ellipse 5.2vw 8vh at 5vw 100%, #050407 96%, transparent 100%) 0 0 / 10vw 100% repeat-x; }
+  /* Tall seat so a face close-up fits (was clipping at the nose in a shorter crop). */
+  #seat { position: fixed; right: calc(13vw + 10px); bottom: 10px; width: min(24vh, 280px); height: min(32vh, 360px); z-index: 4; border-radius: 16px; overflow: hidden;
+    border: 2px solid rgba(232,193,112,.35); box-shadow: 0 8px 30px rgba(0,0,0,.7); background: #0d0c10; pointer-events: none; }
+  #seat iframe { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+</style>
+</head>
+<body>
+<div class="valance"></div>
+<div class="curtain left"></div>
+<div class="curtain right"></div>
+<div id="hall">
+  <div id="marquee">THE THEATER</div>
+  <div id="screen">
+    <div id="player"></div>
+    <div id="empty"><b>NOTHING ON YET</b><span>Paste a YouTube link below, or ask her to put something on.</span></div>
+    <div id="start">▶ Click to start the show</div>
+  </div>
+  <div id="state"><span class="dot"></span><span id="state-text">The screen is dark.</span></div>
+  <form id="put-on" autocomplete="off">
+    <input id="put-link" type="text" name="video" placeholder="YouTube link or search words…" enterkeyhint="go" spellcheck="false">
+    <button type="submit" id="put-btn">Put on</button>
+  </form>
+  <div id="put-msg"></div>
+  <div id="heard"></div>
+</div>
+<div id="seats"></div>
+<div id="seat"><iframe src="/avatar.html?pip=1&silent=1&character=main" allow="autoplay" title="Her seat"></iframe></div>
+
+<script>
+// Her theater (src/theater.js). This page plays the video with YouTube's own player, does what she tells it (the
+// event stream), and tells her where the player is (the reports). Her hearing and her reactions follow those reports.
+const $ = (id) => document.getElementById(id);
+let her = 'She';
+fetch('/api/avatar/status').then((r) => r.json()).then((s) => { if (s && s.name) her = s.name; }).catch(() => {});
+
+let player = null, ready = false, show = null, queued = null, volume = 100, ducked = false, lastError = null, startedAt = 0;
+const STATES = { '-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued' };
+const clock = (s) => { s = Math.max(0, Math.round(s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = String(s % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${r}` : `${m}:${r}`; };
+const playerState = () => { try { return STATES[player.getPlayerState()] ?? 'unstarted'; } catch { return 'unstarted'; } };
+
+// What went wrong, why, and what would fix it, for her and for whoever is looking at the screen.
+const ERRORS = {
+  2: "YouTube says the video address is not valid. Fix: check the address, or search for the video by its name.",
+  5: "YouTube's player couldn't play this video in the browser. Fix: try it again, or another upload of it.",
+  100: 'the video was removed or is private. Fix: pick another video.',
+  101: "the video's owner doesn't allow it to play outside youtube.com. Fix: pick another upload of the same thing.",
+  150: "the video's owner doesn't allow it to play outside youtube.com. Fix: pick another upload of the same thing.",
+  153: "YouTube refused the player (it couldn't tell which page it is on). Fix: reload the theater page; if it keeps happening, the doctor checks the player setup in theater.html.",
+};
+
+function setState(kind, text) { $('state').className = kind; $('state-text').textContent = text; }
+function paint() {
+  $('empty').style.display = show ? 'none' : 'flex';
+  $('screen').classList.toggle('lit', Boolean(show) && playerState() === 'playing');
+  const m = $('marquee');
+  m.textContent = '';
+  if (!show) { m.textContent = 'THE THEATER'; setState('', 'The screen is dark.'); return; }
+  m.append('NOW SHOWING  ·  ' + show.title + ' ');
+  if (show.channel) { const by = document.createElement('small'); by.textContent = show.channel; m.append(by); }
+  if (lastError) return setState('trouble', "This won't play: " + lastError);
+  const st = playerState();
+  const where = ready ? `${clock(player.getCurrentTime?.())}${player.getDuration?.() ? ' / ' + clock(player.getDuration()) : ''}` : '';
+  const hears = show.hearing === 'ready' ? `${her} is listening.` : show.hearing === 'fetching' ? `${her} is getting the sound so she can hear it.` : `${her} can't hear this one: ${show.hearingWhy || 'no sound to read'}`;
+  if (st === 'playing') setState('playing', `Playing  ${where}   ·   ${hears}`);
+  else if (st === 'paused') setState('paused', `Paused  ${where}${show.pausedBy === 'her' ? `   ·   ${her} paused it to ask something` : show.pausedBy ? `   ·   paused by ${show.pausedBy}` : ''}`);
+  else if (st === 'ended') setState('', `Finished.`);
+  else setState('', 'Starting…');
+}
+
+function caption(at, text) {
+  const box = $('heard');
+  box.textContent = '';
+  const label = document.createElement('div'); label.className = 'label'; label.textContent = `${her} hears`;
+  const line = document.createElement('div');
+  const t = document.createElement('span'); t.className = 'at'; t.textContent = at;
+  line.append(t, text);
+  box.append(label, line);
+}
+
+async function report(extra = {}) {
+  if (!show) return;
+  let body;
+  try {
+    body = { id: show.id, state: playerState(), position: player?.getCurrentTime?.() ?? 0, duration: player?.getDuration?.() ?? 0, title: player?.getVideoData?.().title || '', ...extra };
+  } catch { return; }
+  try {
+    const answer = await (await fetch('/api/theater/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+    // She has something else on, or nothing: the screen follows her.
+    if (answer && 'show' in answer && (answer.show?.id ?? null) !== (show?.id ?? null)) put(answer.show);
+  } catch { /* she's restarting: the show plays on, and she picks it up from the next report */ }
+}
+
+// Puts a show on the screen (or clears it): what she has on is what plays.
+function put(next) {
+  lastError = null;
+  if (!next) {
+    show = null;
+    try { player?.stopVideo(); } catch {}
+    $('start').style.display = 'none';
+    $('heard').textContent = '';
+    return paint();
+  }
+  const same = show && show.id === next.id;
+  show = next;
+  if (next.caption) caption(next.caption.at, next.caption.text);
+  if (!ready) { queued = next; return paint(); }
+  if (!same) {
+    startedAt = Date.now();
+    if (next.state === 'paused') player.cueVideoById({ videoId: next.id, startSeconds: next.position || 0 });
+    else player.loadVideoById({ videoId: next.id, startSeconds: next.position || 0 });
+  }
+  paint();
+}
+
+function command(e) {
+  if (e.cmd === 'show') return put(e.show);
+  if (e.cmd === 'caption') return caption(e.at, e.text);
+  if (e.cmd === 'stop') return put(null);
+  if (!ready || !show) return;
+  if (e.cmd === 'pause') player.pauseVideo();
+  else if (e.cmd === 'play') player.playVideo();
+  else if (e.cmd === 'seek') { player.seekTo(e.to, true); setTimeout(report, 400); }
+  else if (e.cmd === 'volume') { volume = e.level; player.setVolume(ducked ? Math.round(volume * 0.3) : volume); }
+  else if (e.cmd === 'duck') { ducked = e.on; player.setVolume(ducked ? Math.round(volume * 0.3) : volume); } // she's speaking: the show dips under her
+}
+
+// YouTube's player, in the screen.
+window.onYouTubeIframeAPIReady = () => {
+  player = new YT.Player('player', {
+    width: '100%', height: '100%',
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0, origin: location.origin },
+    events: {
+      onReady: () => { ready = true; if (queued) { const q = queued; queued = null; show = null; put(q); } },
+      onStateChange: () => { $('start').style.display = 'none'; paint(); report(); },
+      onError: (e) => { lastError = ERRORS[e.data] ?? `YouTube's player reported error ${e.data}. Fix: try another video.`; paint(); report({ error: lastError }); },
+    },
+  });
+};
+const api = document.createElement('script');
+api.src = 'https://www.youtube.com/iframe_api';
+api.onerror = () => { lastError = "YouTube's player couldn't be loaded (no internet, or youtube.com is blocked on this PC). Fix: check the connection and reload this page."; paint(); report({ error: lastError }); };
+document.head.append(api);
+
+// A browser that won't start sound on its own (not hers: hers is started allowing it) gets a click-to-start.
+$('start').addEventListener('click', () => { $('start').style.display = 'none'; try { player.playVideo(); } catch {} });
+
+// Link bar: put a show on from this page (same path as her theater play tool).
+$('put-on').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const input = $('put-link');
+  const btn = $('put-btn');
+  const msg = $('put-msg');
+  const video = String(input.value || '').trim();
+  msg.className = '';
+  if (!video) { msg.className = 'err'; msg.textContent = 'Type a YouTube address or search words.'; input.focus(); return; }
+  btn.disabled = true;
+  msg.textContent = 'Putting it on…';
+  try {
+    const res = await fetch('/api/theater/play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video, by: 'someone at the screen', conversation: 'theater' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || data.message || `Couldn't put it on (${res.status})`);
+    msg.textContent = data.result ? String(data.result).slice(0, 160) : 'On the screen.';
+    if (data.show) put(data.show);
+    input.value = '';
+  } catch (err) {
+    msg.className = 'err';
+    msg.textContent = err.message || String(err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// The player's clock, once a second: where the show is, so what she hears follows it.
+setInterval(() => {
+  if (!show || !ready) return;
+  const st = playerState();
+  if (show.state !== 'paused' && (st === 'unstarted' || st === 'cued') && Date.now() - startedAt > 4000 && !lastError) $('start').style.display = 'flex';
+  paint();
+  report();
+}, 1000);
+
+// What she tells the theater to do, and what she hears.
+const stream = new EventSource('/api/theater/events');
+stream.onmessage = (m) => { try { command(JSON.parse(m.data)); } catch (err) { console.error('theater command', err); } };
+paint();
+</script>
+</body>
+</html>

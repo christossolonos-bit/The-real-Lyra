@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Character Creator</title>
+<style>
+  :root{
+    --bg:#070b10; --panel:#0e161e; --panel2:#132029; --line:#1f3340; --text:#dbe9ef; --muted:#7f9aa6;
+    --accent:#3fe0ff; --accent2:#0f6f86; --warn:#ffb86b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  #app{display:grid;grid-template-columns:1fr 360px;height:100%}
+  #stage{position:relative;min-width:0}
+  canvas{display:block}
+  #title{position:absolute;left:20px;top:16px;pointer-events:none}
+  #title h1{margin:0;font-size:20px;letter-spacing:.18em;font-weight:600;color:var(--accent);text-transform:uppercase}
+  #title p{margin:2px 0 0;color:var(--muted);font-size:12px;letter-spacing:.08em}
+  #viewbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:6px;background:rgba(14,22,30,.85);border:1px solid var(--line);border-radius:10px;padding:6px}
+  #loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);letter-spacing:.1em}
+  aside{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:14px 14px 90px}
+  section{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+  section h2{margin:0 0 8px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .row label{flex:0 0 92px;color:var(--muted);font-size:12px}
+  .stepper{display:flex;align-items:center;gap:6px;flex:1}
+  .stepper output{flex:1;text-align:center;font-variant-numeric:tabular-nums;background:#0a1117;border:1px solid var(--line);border-radius:6px;padding:4px 0}
+  button{background:#0a1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;font:inherit}
+  button:hover{border-color:var(--accent2)}
+  button.on{background:var(--accent2);border-color:var(--accent);color:#fff}
+  button.wide{width:100%}
+  .sw{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+  .sw button{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid #0006}
+  .sw button.on{outline:2px solid var(--accent);outline-offset:1px}
+  input[type=color]{width:30px;height:26px;border:none;background:none;padding:0;cursor:pointer}
+  input[type=range]{flex:1;accent-color:var(--accent)}
+  select{flex:1;background:#0a1117;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px}
+  #parts .row label{flex-basis:80px}
+  .hint{color:var(--muted);font-size:12px;margin:4px 0 0}
+  #actions{position:fixed;right:0;bottom:0;width:360px;display:flex;gap:8px;padding:12px 14px;background:var(--panel);border-top:1px solid var(--line)}
+  #actions button{flex:1;padding:8px}
+  #actions .primary{background:var(--accent2);border-color:var(--accent)}
+  #toast{position:absolute;left:50%;top:18px;transform:translateX(-50%);background:var(--accent2);padding:6px 14px;border-radius:8px;opacity:0;transition:opacity .3s}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <div id="loading">Loading model…</div>
+    <div id="title"><h1>Lyra</h1><p>Character creator · private test</p></div>
+    <div id="toast"></div>
+    <div id="viewbar">
+      <button data-view="face">Face</button>
+      <button data-view="upper">Upper body</button>
+      <button data-view="full" class="on">Full body</button>
+      <button id="spin">Auto-turn</button>
+      <button id="holo">Hologram</button>
+    </div>
+  </div>
+  <aside>
+    <section>
+      <h2>Hair</h2>
+      <div class="row"><label>Style</label><div class="stepper"><button data-step="hair:-1">◀</button><output id="hairOut">–</output><button data-step="hair:1">▶</button></div></div>
+      <div class="row"><label>Colour</label><div class="sw" id="hairSw"></div><input type="color" id="hairPick"></div>
+      <div class="row"><label>Brightness</label><input type="range" id="hairBright" min="0.5" max="2" step="0.05" value="1"></div>
+    </section>
+    <section>
+      <h2>Face</h2>
+      <div class="row"><label>Face shape</label><div class="stepper"><button data-step="head:-1">◀</button><output id="headOut">–</output><button data-step="head:1">▶</button></div></div>
+      <div class="row"><label>Skin tone</label><div class="sw" id="skinSw"></div><input type="color" id="skinPick"></div>
+      <div class="row"><label>Eye colour</label><div class="sw" id="eyeSw"></div></div>
+      <div class="row"><label>Ears</label><div class="stepper"><button data-step="ears:-1">◀</button><output id="earsOut">–</output><button data-step="ears:1">▶</button></div></div>
+    </section>
+    <section>
+      <h2>Accessories</h2>
+      <div class="row"><label>Earrings</label><div class="stepper"><button data-step="piercing:-1">◀</button><output id="piercingOut">–</output><button data-step="piercing:1">▶</button></div></div>
+      <div class="row"><label>Necklace</label><div class="stepper"><button data-step="necklace:-1">◀</button><output id="necklaceOut">–</output><button data-step="necklace:1">▶</button></div></div>
+    </section>
+    <section>
+      <h2>Outfit</h2>
+      <div class="row"><label>Style</label><select id="outfitStyle">
+        <option value="lyra">Lyra series look</option>
+        <option value="base">Base (swimwear)</option>
+      </select></div>
+      <div id="lyraOutfit">
+        <div class="row"><label>Top</label><div class="sw" id="topSw"></div><input type="color" id="topPick"></div>
+        <div class="row"><label>Trousers</label><div class="sw" id="pantsSw"></div><input type="color" id="pantsPick"></div>
+        <div class="row"><label>Flats</label><div class="sw" id="shoesSw"></div><input type="color" id="shoesPick"></div>
+        <div class="row"><label>Neckline</label><input type="range" id="neck" min="0" max="1" step="0.05" title="Left: high neck. Right: scoop"></div>
+        <p class="hint">Left = high neck, right = scoop.</p>
+        <p class="hint">Teal long-sleeve scoop top, fitted dark trousers, flats.</p>
+      </div>
+      <div id="baseOutfit">
+        <div class="row"><label>Colour</label><div class="sw" id="outfitSw"></div><input type="color" id="outfitPick"></div>
+      </div>
+    </section>
+    <section>
+      <h2>Pose</h2>
+      <div class="row"><label>Animation</label><select id="anim"></select></div>
+    </section>
+    <section id="parts">
+      <h2>All model parts</h2>
+      <div id="partRows"></div>
+      <p class="hint">Every option group in the model. 0 = off.</p>
+    </section>
+  </aside>
+</div>
+<div id="actions">
+  <button id="random">Randomise</button>
+  <button id="reset">Reset</button>
+  <button id="save" class="primary">Save look</button>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { loadRetargeted } from './retarget.js';
+
+const MODEL = 'models/humanfemale_hd.glb';
+const PREFIX = 'humanfemale_hd_';
+const STORE = 'lyra-look-v1';
+
+// ---------- palettes ----------
+const HAIR = { 'Lyra chestnut':'#7a4524', 'Dark brown':'#3b2416', 'Black':'#141110', 'Auburn':'#8a3a1e', 'Copper':'#b5561f', 'Honey':'#b9884a', 'Blonde':'#d8b26c', 'Platinum':'#e6e0d2', 'Silver':'#a9adb3' };
+const SKIN = { 'Original':'#ffffff', 'Fair':'#fff1ea', 'Warm':'#ffe2c8', 'Olive':'#e9cfa4', 'Tan':'#d9a77c', 'Bronze':'#b8805a', 'Deep':'#7f553c' };
+const EYES = { 'Original':0, 'Hazel':-0.12, 'Blue':0.33, 'Grey-blue':0.28, 'Teal':0.18, 'Amber':-0.2, 'Violet':0.55 };
+const OUTFIT = { 'Original':'#000000', 'Lyra teal':'#0f5b6b', 'Black':'#1a1d21', 'White':'#e6e6e6', 'Navy':'#1c2a4a', 'Wine':'#5a1a2a' };
+
+const DEFAULT = { hair: 8, head: 2, ears: 2, piercing: 0, necklace: 0,
+  hairColor: HAIR['Lyra chestnut'], hairBright: 1, skin: SKIN.Original, eye: 'Hazel', outfit: OUTFIT['Lyra teal'],
+  anim: 'Stand (ID 0 variation 0)', parts: {},
+  outfitStyle: 'lyra', top: '#0f5b6b', pants: '#14353d', shoes: '#1a1d21', neckline: 0 };
+const TOPS = { 'Lyra teal':'#0f5b6b', 'Deep teal':'#0b4350', 'Petrol':'#16505e', 'Cream':'#e6dccb', 'Black':'#16181b', 'White':'#ececec' };
+const PANTS = { 'Lyra dark teal':'#14353d', 'Charcoal':'#26292d', 'Black':'#121315', 'Navy':'#1c2a4a', 'Denim':'#3a5577' };
+const SHOES = { 'Black':'#1a1d21', 'Dark teal':'#123038', 'Nude':'#c9a58a', 'White':'#e3e3e3' };
+let look = load();
+
+// ---------- scene ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const studioBg = new THREE.Color('#1b252d'), holoBg = new THREE.Color('#03070b');
+scene.background = studioBg;
+const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight('#dfefff', '#3a2a22', 1.4));
+const key = new THREE.DirectionalLight('#fff4e6', 2.2); key.position.set(1.5, 3, 3); scene.add(key);
+const rim = new THREE.DirectionalLight('#9fe8ff', 1.4); rim.position.set(-2, 2.5, -3); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(1.6, 64), new THREE.MeshStandardMaterial({ color: '#141c22', roughness: 1 }));
+floor.rotation.x = -Math.PI / 2; scene.add(floor);
+
+// hologram projector
+const holoGroup = new THREE.Group(); holoGroup.visible = false; scene.add(holoGroup);
+const cyan = new THREE.Color('#3fe0ff');
+const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.6, 0.06, 64), new THREE.MeshStandardMaterial({ color: '#1a2228', metalness: .8, roughness: .35 }));
+disc.position.y = 0.03; holoGroup.add(disc);
+for (const [r, w, o] of [[0.5, 0.012, .9], [0.38, 0.006, .6], [0.24, 0.004, .5]]) {
+  const ring = new THREE.Mesh(new THREE.RingGeometry(r - w, r, 96), new THREE.MeshBasicMaterial({ color: cyan, transparent: true, opacity: o, blending: THREE.AdditiveBlending }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.062; holoGroup.add(ring);
+}
+const beamMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  uniforms: { uColor: { value: cyan } },
+  vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+  fragmentShader: 'uniform vec3 uColor; varying float vY; void main(){ gl_FragColor = vec4(uColor, pow(1.0-vY, 2.0)*0.09); }'
+});
+const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 2.2, 48, 1, true), beamMat);
+beam.position.y = 1.16; holoGroup.add(beam);
+
+// ---------- recolour shaders ----------
+const U = { uHair: { value: new THREE.Color() }, uHairBright: { value: 1 }, uSkin: { value: new THREE.Color() },
+  uOutfit: { value: new THREE.Color() }, uOutfitOn: { value: 1 }, uEyeHue: { value: 0 }, uHolo: { value: 0 }, uTime: { value: 0 }, uCyan: { value: cyan },
+  uLyra: { value: 1 }, uTop: { value: new THREE.Color() }, uPants: { value: new THREE.Color() }, uShoes: { value: new THREE.Color() }, uNeck: { value: 1 } };
+// Lyra's locked series look, painted by rest-pose position (model is T-posed, faces +X, arms along Z)
+const GLSL_OUTFIT = `
+float topMask(vec3 p){
+  float az = abs(p.z);
+  if (p.y > 1.69) return 0.0;                                   // head/neck
+  if (az > 0.52) return 0.0;                                    // hands (sleeves end at the wrist)
+  if (az > 0.17) return p.y > 1.08 ? 1.0 : 0.0;                 // sleeves (arms slope down in the bind pose)
+  if (p.y < 1.035) return 0.0;                                  // hem at the hip
+  // uNeck: 0 = high crew neck (no chest skin), 1 = Lyra's scoop
+  float neckF = mix(1.665 + 1.5 * p.z * p.z, 1.505 + 3.2 * p.z * p.z, uNeck);
+  float neckB = mix(1.675, 1.60 + 2.0 * p.z * p.z, uNeck);
+  float lim = p.x > 0.0 ? mix(neckB, neckF, smoothstep(0.0, 0.05, p.x)) : neckB;
+  lim = az > 0.13 ? max(lim, 1.66) : lim;                       // shoulders covered
+  return smoothstep(lim + 0.004, lim - 0.004, p.y);
+}
+float pantsMask(vec3 p){ return (p.y < 1.12 && p.y > 0.085 && abs(p.z) < 0.30) ? 1.0 : 0.0; }
+float shoeMask(vec3 p){ return p.y < 0.085 ? 1.0 : 0.0; }`;
+const GLSL_HUE = `
+vec3 hueShift(vec3 c, float h){ const vec3 k = vec3(0.57735); float a = h*6.2831853; float ca = cos(a);
+  return c*ca + cross(k,c)*sin(a) + k*dot(k,c)*(1.0-ca); }
+vec3 hairMap(vec3 t){ float l = dot(t, vec3(.3,.59,.11)); float k = clamp(l/0.42,0.,1.4);
+  return uHair*uHairBright*(0.28 + 0.95*k); }`;
+function patch(mat, mode) {
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = 'varying vec3 vRest;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = position;');
+    sh.fragmentShader = `uniform vec3 uHair; uniform float uHairBright; uniform vec3 uSkin; uniform vec3 uOutfit; uniform float uOutfitOn;
+      uniform float uEyeHue; uniform float uHolo; uniform float uTime; uniform vec3 uCyan;
+      uniform float uLyra; uniform vec3 uTop; uniform vec3 uPants; uniform vec3 uShoes; uniform float uNeck; varying vec3 vRest;
+      \n${GLSL_HUE}\n${GLSL_OUTFIT}\n` + sh.fragmentShader;
+    let body = '';
+    if (mode === 'skin') body = `
+      { vec2 uv = vMapUv; vec3 t = diffuseColor.rgb; float l = dot(t, vec3(.3,.59,.11));
+        float sat = max(t.r,max(t.g,t.b)) - min(t.r,min(t.g,t.b));
+        float dark = 1.0 - smoothstep(0.16, 0.34, l);
+        bool face = uv.x > 0.5 && uv.y < 0.6;
+        bool body = uv.x < 0.5 && uv.y < 0.56;
+        bool eye = uv.x > 0.72 && uv.y > 0.66;
+        vec3 c = t * uSkin;
+        if (face) c = mix(c, hairMap(t), dark);
+        if (uLyra > 0.5) {
+          // painted-on underwear that the series outfit doesn't cover (straps) becomes skin
+          if (body) c = mix(c, vec3(0.74, 0.57, 0.47) * uSkin, 1.0 - smoothstep(0.2, 0.52, l));
+          // flat fabric shade: no texture detail, so the painted underwear can't show through
+          float fab = 0.95;
+          float tm = topMask(vRest), pm = pantsMask(vRest), sm = shoeMask(vRest);
+          cloth = max(tm, max(pm * (1.0 - tm), sm));
+          // hems: neckline, cuffs, waist, ankles (where cloth meets skin)
+          hem = clamp(fwidth(cloth) * 1.5, 0.0, 1.0);
+          c = mix(c, uPants * fab, pm * (1.0 - tm));
+          c = mix(c, uShoes * (0.8 + 0.3 * l), sm);
+          c = mix(c, uTop * fab, tm);
+          // soft seam where the neckline and cuffs meet skin
+          float edge = tm * (1.0 - smoothstep(0.0, 0.012, abs(vRest.y - 1.69)));
+          c *= 1.0 - 0.15 * edge;
+        } else if (body && uOutfitOn > 0.5) c = mix(c, uOutfit*(0.55 + 1.6*l), dark);
+        if (eye && sat > 0.08 && t.g > t.r && t.g >= t.b) c = hueShift(t, uEyeHue);
+        diffuseColor.rgb = c; }`;
+    if (mode === 'hair') body = `diffuseColor.rgb = hairMap(diffuseColor.rgb);`;
+    if (mode === 'eye') body = `{ vec3 t = diffuseColor.rgb; float sat = max(t.r,max(t.g,t.b)) - min(t.r,min(t.g,t.b));
+        if (sat > 0.08 && t.g > t.r && t.g >= t.b) diffuseColor.rgb = hueShift(t, uEyeHue); }`;
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\nfloat cloth = 0.0; float hem = 0.0;\n' + body)
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+        if (uHolo > 0.5) {
+          // solid, lit hologram: her own shading becomes cyan light (no see-through)
+          float l = dot(gl_FragColor.rgb, vec3(.3,.59,.11));
+          l = ${mode === 'hair' ? '0.10 + l * 1.6' : 'l'};
+          float fr = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.5);
+          float scan = 0.86 + 0.14 * sin(gl_FragCoord.y * 1.6 - uTime * 6.0);
+          float band = 0.92 + 0.08 * smoothstep(0.96, 1.0, sin(gl_FragCoord.y * 0.02 - uTime * 1.5));
+          float flick = 0.97 + 0.03 * sin(uTime * 41.0);
+          vec3 c = uCyan * (0.04 + 1.45 * pow(clamp(l, 0.0, 1.5), 1.3));
+          c = mix(c, vec3(0.85, 1.0, 1.0), smoothstep(0.75, 1.1, l) * 0.35);   // bright highlights go towards white
+          c += uCyan * fr * 0.8;                                                // edge glow
+          // clothing reads as clothing: dimmer, with a fine woven light pattern and glowing hems
+          if (cloth > 0.0) {
+            float weave = 0.82 + 0.18 * sin(vRest.y * 900.0) * sin(vRest.z * 900.0 + vRest.x * 900.0);
+            c = mix(c, c * 0.55 * weave + uCyan * fr * 0.5, cloth);
+          }
+          c += uCyan * hem * 1.2;
+          gl_FragColor = vec4(c * scan * band * flick, 1.0);
+        }`);
+  };
+  mat.customProgramCacheKey = () => mode;
+  mat.needsUpdate = true;
+}
+
+// ---------- model ----------
+const groups = {}; // name -> { idx -> [meshes] }
+let model, mixer, clips = [], action, bbox;
+new GLTFLoader().load(MODEL, (g) => {
+  model = g.scene; scene.add(model);
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    const name = (o.name || o.parent?.name || '').replace(PREFIX, '');
+    const m = name.match(/^([A-Za-z]+?)(\d+)(?:_\d+)?$/);
+    const grp = m ? m[1] : name, idx = m ? +m[2] : 0;
+    ((groups[grp] ??= {})[idx] ??= []).push(o);
+    const mn = o.material.name;
+    const mode = mn === 'skin' ? 'skin' : mn === 'texture-type-6' ? 'hair' : mn === 'texture-type-19' ? 'eye' : 'other';
+    o.material = o.material.clone(); patch(o.material, mode);
+    o.userData.mode = mode;
+  });
+  // normalise: face the camera (+Z), stand on the floor
+  model.rotation.y = -Math.PI / 2;
+  model.updateMatrixWorld(true);
+  bbox = new THREE.Box3().setFromObject(model);
+  model.position.y -= bbox.min.y;
+  bbox = new THREE.Box3().setFromObject(model);
+  mixer = new THREE.AnimationMixer(model);
+  clips = g.animations;
+  const sel = document.getElementById('anim');
+  const pref = ['Stand', 'EmoteTalk', 'EmoteTalkQuestion', 'EmoteWave', 'EmoteLaugh', 'EmoteShy', 'EmoteCheer', 'EmoteBow', 'EmoteDance', 'EmoteKiss', 'EmoteApplaud', 'EmotePoint', 'Walk', 'Run', 'SitChairMed', 'KneelLoop', 'Hover'];
+  const sorted = [...clips].sort((a, b) => {
+    const ia = pref.findIndex(p => a.name.startsWith(p + ' ')), ib = pref.findIndex(p => b.name.startsWith(p + ' '));
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.name.localeCompare(b.name);
+  });
+  for (const c of sorted) sel.add(new Option(c.name.replace(/ \(ID.*variation 0\)/, '').replace(/ \(ID \d+ (variation \d+)\)/, ' · $1'), c.name));
+  sel.onchange = () => { look.anim = sel.value; playAnim(); persist(); };
+  // Rocketbox motion library, retargeted onto her skeleton (baked once, in the background)
+  loadRetargeted('models/rocketbox_anims.glb', model, new GLTFLoader()).then((rb) => {
+    clips.push(...rb);
+    const grp = document.createElement('optgroup'); grp.label = 'Rocketbox motion';
+    for (const c of rb) grp.append(new Option(c.name.replace(/^RB f_/, '').replace(/_/g, ' '), c.name));
+    sel.append(grp);
+    body.ready(rb);
+  }).catch((e) => console.warn('Rocketbox animations not loaded:', e));
+  buildPartRows();
+  document.getElementById('loading').remove();
+  apply(); setView('full'); resize();
+}, (e) => {
+  if (e.total) document.getElementById('loading').textContent = `Loading model… ${Math.round(e.loaded / e.total * 100)}%`;
+}, (err) => { document.getElementById('loading').textContent = 'Could not load the model: ' + err.message; });
+
+// groups shown with a "main" picker; others live under All model parts
+const MAIN = { hair: 'Hair', head: 'HeadSwap', ears: 'Ears', piercing: 'Piercings', necklace: 'Necklace' };
+// default naked variants for armour slots (WoW xx01 = bare)
+const BASE_PARTS = { Geoset: 0, Gloves: 1, Boots: 1, Feet: 1, Torso: 1, Trousers: 1, Belt: 0, Eyes: 1, Eyeglow: 0, EyeGlowB: 0 };
+// HeadSwap1 is only a neck strip; the real faces are HeadSwap 2-4
+function optionsOf(grp) { return Object.keys(groups[grp] || {}).map(Number).filter(n => !(grp === 'HeadSwap' && n < 2)).sort((a, b) => a - b); }
+function partValue(grp) {
+  for (const [k, g] of Object.entries(MAIN)) if (g === grp) return look[k];
+  return look.parts[grp] ?? BASE_PARTS[grp] ?? 0;
+}
+function apply() {
+  if (!model) return;
+  for (const [grp, opts] of Object.entries(groups)) {
+    const v = grp === 'Geoset' ? 0 : partValue(grp);
+    for (const [idx, meshes] of Object.entries(opts)) for (const m of meshes) m.visible = grp === 'Geoset' || +idx === v;
+  }
+  U.uHair.value.set(look.hairColor); U.uHairBright.value = look.hairBright;
+  U.uSkin.value.set(look.skin); U.uEyeHue.value = EYES[look.eye] ?? 0;
+  U.uOutfitOn.value = look.outfit === '#000000' ? 0 : 1; U.uOutfit.value.set(look.outfit);
+  const lyraOn = look.outfitStyle === 'lyra';
+  U.uLyra.value = lyraOn ? 1 : 0; U.uTop.value.set(look.top); U.uPants.value.set(look.pants); U.uShoes.value.set(look.shoes); U.uNeck.value = look.neckline;
+  document.getElementById('outfitStyle').value = look.outfitStyle;
+  document.getElementById('lyraOutfit').hidden = !lyraOn; document.getElementById('baseOutfit').hidden = lyraOn;
+  document.getElementById('topPick').value = look.top; document.getElementById('pantsPick').value = look.pants;
+  document.getElementById('shoesPick').value = look.shoes; document.getElementById('neck').value = look.neckline;
+  for (const [k, g] of Object.entries(MAIN)) {
+    const out = document.getElementById(k + 'Out'); const v = look[k];
+    const opts = optionsOf(g);
+    if (out) out.textContent = v === 0 ? 'None' : `${opts.indexOf(v) + 1} / ${opts.length}`;
+  }
+  document.getElementById('hairPick').value = look.hairColor;
+  document.getElementById('hairBright').value = look.hairBright;
+  document.getElementById('skinPick').value = look.skin;
+  document.getElementById('outfitPick').value = look.outfit === '#000000' ? '#0f5b6b' : look.outfit;
+  markSwatches();
+  for (const sel of document.querySelectorAll('#partRows select')) sel.value = partValue(sel.dataset.grp);
+  playAnim();
+}
+function playAnim() {
+  if (!mixer) return;
+  const clip = clips.find(c => c.name === look.anim) || clips[0];
+  document.getElementById('anim').value = clip.name;
+  if (action?.getClip() === clip || new URLSearchParams(location.search).has('embed')) return;
+  const next = mixer.clipAction(clip); next.reset().play();
+  if (action) action.crossFadeTo(next, 0.3, false);
+  action = next;
+}
+function step(k, d) {
+  const opts = [0, ...optionsOf(MAIN[k]).filter(n => n !== 0)];
+  if (k === 'hair' || k === 'head') opts.shift(); // always a hairstyle and a face
+  const i = opts.indexOf(look[k]); look[k] = opts[(i + d + opts.length) % opts.length];
+  apply(); persist();
+}
+document.querySelectorAll('[data-step]').forEach(b => b.onclick = () => { const [k, d] = b.dataset.step.split(':'); step(k, +d); });
+
+function swatches(id, map, keyName, isColor = true) {
+  const el = document.getElementById(id);
+  for (const [name, val] of Object.entries(map)) {
+    const b = document.createElement('button'); b.title = name; b.dataset.val = val;
+    b.style.background = isColor ? (val === '#000000' ? 'repeating-linear-gradient(45deg,#333 0 4px,#666 4px 8px)' : val)
+      : `hsl(${110 + val * 360}, 55%, 42%)`;
+    if (!isColor) b.dataset.val = name;
+    b.onclick = () => { look[keyName] = isColor ? val : name; apply(); persist(); };
+    el.append(b);
+  }
+}
+swatches('hairSw', HAIR, 'hairColor'); swatches('skinSw', SKIN, 'skin'); swatches('eyeSw', EYES, 'eye', false); swatches('outfitSw', OUTFIT, 'outfit');
+swatches('topSw', TOPS, 'top'); swatches('pantsSw', PANTS, 'pants'); swatches('shoesSw', SHOES, 'shoes');
+for (const [id, k] of [['topPick', 'top'], ['pantsPick', 'pants'], ['shoesPick', 'shoes']])
+  document.getElementById(id).oninput = e => { look[k] = e.target.value; apply(); persist(); };
+document.getElementById('neck').oninput = e => { look.neckline = +e.target.value; apply(); persist(); };
+document.getElementById('outfitStyle').onchange = e => { look.outfitStyle = e.target.value; apply(); persist(); };
+function markSwatches() {
+  const pairs = [['hairSw', look.hairColor], ['skinSw', look.skin], ['eyeSw', look.eye], ['outfitSw', look.outfit],
+    ['topSw', look.top], ['pantsSw', look.pants], ['shoesSw', look.shoes]];
+  for (const [id, v] of pairs) document.querySelectorAll(`#${id} button`).forEach(b => b.classList.toggle('on', b.dataset.val.toLowerCase() === String(v).toLowerCase()));
+}
+document.getElementById('hairPick').oninput = e => { look.hairColor = e.target.value; apply(); persist(); };
+document.getElementById('skinPick').oninput = e => { look.skin = e.target.value; apply(); persist(); };
+document.getElementById('outfitPick').oninput = e => { look.outfit = e.target.value; apply(); persist(); };
+document.getElementById('hairBright').oninput = e => { look.hairBright = +e.target.value; apply(); persist(); };
+
+function buildPartRows() {
+  const box = document.getElementById('partRows');
+  const skip = new Set(['Geoset', ...Object.values(MAIN)]);
+  for (const grp of Object.keys(groups).sort()) {
+    if (skip.has(grp)) continue;
+    const row = document.createElement('div'); row.className = 'row';
+    const sel = document.createElement('select'); sel.dataset.grp = grp;
+    sel.add(new Option('0 · off', 0));
+    for (const n of optionsOf(grp)) if (n) sel.add(new Option(String(n), n));
+    sel.onchange = () => { look.parts[grp] = +sel.value; apply(); persist(); };
+    row.innerHTML = `<label>${grp}</label>`; row.append(sel); box.append(row);
+  }
+}
+
+// ---------- view ----------
+let spin = false, holo = false;
+function setView(v) {
+  document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  if (!bbox) return;
+  const h = bbox.max.y - bbox.min.y, cx = (bbox.max.x + bbox.min.x) / 2, cz = (bbox.max.z + bbox.min.z) / 2;
+  const front = new THREE.Vector3(0, 0, 1);
+  const presets = { face: [0.9, 0.26 * h], upper: [0.76, 0.5 * h], full: [0.5, 1.05 * h] };
+  const [ty, span] = presets[v]; const y = bbox.min.y + h * ty;
+  const dist = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  controls.target.set(cx, y, cz);
+  camera.position.set(cx, y + (v === 'full' ? h * 0.05 : 0), cz).addScaledVector(front, dist);
+  controls.update();
+}
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+document.getElementById('spin').onclick = (e) => { spin = !spin; e.target.classList.toggle('on', spin); };
+document.getElementById('holo').onclick = (e) => {
+  holo = !holo; e.target.classList.toggle('on', holo);
+  U.uHolo.value = holo ? 1 : 0; holoGroup.visible = holo; floor.visible = !holo;
+  scene.background = holo ? holoBg : studioBg;
+  key.intensity = holo ? 2.6 : 2.2;
+};
+
+// ---------- save / load ----------
+function load() { try { return { ...structuredClone(DEFAULT), ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch { return structuredClone(DEFAULT); } }
+// Nothing saved in this browser yet (or embedded on the talk page): use her saved look file.
+(async () => {
+  let saved = null; try { saved = localStorage.getItem(STORE); } catch {}
+  if (saved) return; // a look saved in this browser always wins
+  try {
+    const r = await fetch('lyra_look.json', { cache: 'no-cache' }); if (!r.ok) return;
+    look = { ...structuredClone(DEFAULT), ...(await r.json()) }; apply();
+  } catch {}
+})();
+function persist() { try { localStorage.setItem(STORE, JSON.stringify(look)); } catch {} }
+function toast(t) { const el = document.getElementById('toast'); el.textContent = t; el.style.opacity = 1; setTimeout(() => el.style.opacity = 0, 1600); }
+document.getElementById('save').onclick = () => {
+  persist();
+  const blob = new Blob([JSON.stringify({ model: MODEL, ...look }, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'lyra_look.json' }); a.click();
+  toast('Saved lyra_look.json');
+};
+document.getElementById('reset').onclick = () => { look = structuredClone(DEFAULT); apply(); persist(); toast('Reset'); };
+document.getElementById('random').onclick = () => {
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  look.hair = pick(optionsOf('Hair').filter(Boolean)); look.head = pick(optionsOf('HeadSwap'));
+  look.hairColor = pick(Object.values(HAIR)); look.eye = pick(Object.keys(EYES));
+  look.piercing = pick([0, 0, ...optionsOf('Piercings')]); look.necklace = pick([0, 0, ...optionsOf('Necklace')]);
+  apply(); persist();
+};
+
+// ---------- loop ----------
+// soft glow around her in hologram mode
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.6, 0.55, 0.42);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta(); U.uTime.value += dt;
+  mixer?.update(dt);
+  if (spin && model) model.rotation.y += dt * 0.5;
+  controls.update();
+  if (holo) composer.render(); else renderer.render(scene, camera);
+});
+// ---------- embed mode: the talk page shows her full-screen and drives her body ----------
+// /creator/?embed=1&view=full  -> no panels, hologram on, and window.__lyra.body controls gestures + talking
+const EMBED = new URLSearchParams(location.search);
+const GESTURES = { wave: 'EmoteWave', laugh: 'EmoteLaugh', shy: 'EmoteShy', nod: 'EmoteYes', shake: 'EmoteNo', bow: 'EmoteBow',
+  cheer: 'EmoteCheer', point: 'EmotePoint', kiss: 'EmoteKiss', applaud: 'EmoteApplaud', dance: 'EmoteDanceOnce', kneel: 'EmoteKneel',
+  sit: 'EmoteSitGround', think: 'EmoteTalkQuestion' };
+const TALKS = ['EmoteTalk', 'EmoteTalkQuestion', 'EmoteTalkExclamation'];
+const MOOD_TINT = { happy: '#4fe6ff', playful: '#5ff0ff', tender: '#6fd8ff', curious: '#3fe0ff', excited: '#7ff6ff', shy: '#62d2ff',
+  proud: '#4fe9ff', calm: '#3fe0ff', thoughtful: '#3ccfee', worried: '#3ab8e0', sad: '#3a9fd6', annoyed: '#38c8e8', lonely: '#3a96cc' };
+const clipBy = (prefix) => clips.find(c => c.name.startsWith(prefix + ' ('));
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const range = (base, n) => Array.from({ length: n }, (_, i) => `${base}0${i + 1}`);
+
+// Rocketbox pools: what she does while idle, talking, listening, thinking, by mood
+const RB = {
+  idle: [...range('idle_neutral_', 9), ...range('idle_breathe_', 3), ...range('idle_look_around_', 3), 'idle_waiting_01', 'idle_roll_head_01', 'idle_move_leg_01'],
+  idleMood: { shy: ['idle_touch_hair_01', 'idle_touch_face_01'], worried: ['idle_nervous_01'], thoughtful: ['gestic_thoughtful_01'] },
+  talk: {
+    neutral: [...range('gestic_talk_neutral_', 3), 'gestic_talk_left_01', 'gestic_talk_right_01'],
+    relaxed: range('gestic_talk_relaxed_', 2), excited: [...range('gestic_talk_excited_', 2), 'gestic_talk_cool'],
+    proud: [...range('gestic_talk_self-assured_', 2), 'gestic_talk_cool'], sad: ['gestic_talk_sad_01'],
+    nervous: range('gestic_talk_nervous_', 2), angry: ['gestic_talk_angry_01'],
+  },
+  listen: {
+    neutral: range('gestic_listen_neutral_', 3), relaxed: ['gestic_listen_relaxed_01'], excited: ['gestic_listen_excited_01'],
+    proud: ['gestic_listen_self-assured_01'], sad: ['gestic_listen_sad_01'], nervous: ['gestic_listen_nervous_01'], angry: ['gestic_listen_neutral_01'],
+  },
+  gesture: { wave: ['wave_01', 'wave_02'], laugh: ['gestic_laugh_low', 'gestic_laugh_loud'], shy: ['idle_touch_hair_01'],
+    nod: range('gestic_listen_accept_', 3), shake: range('gestic_listen_deny_', 2), think: ['gestic_thoughtful_01'],
+    point: ['gestic_presentation_right_01', 'gestic_presentation_left_01'], applaud: ['claphands_01'], cheer: ['cheer_01'],
+    dance: ['dancing_affective'], shrug: ['gestic_shrug_01'] },
+};
+// her mood -> which style of talking / listening
+const STYLE = { happy: 'excited', playful: 'excited', excited: 'excited', proud: 'proud', curious: 'relaxed', calm: 'relaxed',
+  tender: 'relaxed', thoughtful: 'neutral', shy: 'nervous', worried: 'nervous', sad: 'sad', lonely: 'sad', annoyed: 'angry' };
+
+const body = {
+  talking: false, listening: false, thinking: false, moodName: 'calm', gestureUntil: 0, rb: null, base: null, nextSwitch: 0, current: '',
+  // play a clip; long Rocketbox clips start somewhere random so she never repeats the same few seconds
+  play(clip, once = false, fade = 0.6) {
+    if (!mixer || !clip) return;
+    const next = mixer.clipAction(clip);
+    next.reset(); next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); next.clampWhenFinished = once;
+    if (!once && clip.duration > 12) next.time = Math.random() * (clip.duration - 9);
+    next.play();
+    if (action && action !== next) action.crossFadeTo(next, fade, false);
+    action = next; body.current = clip.name;
+  },
+  rbClip(name) { return body.rb?.get('RB f_' + name); },
+  ready(rb) {
+    body.rb = new Map(rb.map((c) => [c.name, c]));
+    // fingers, twist bones and the face keep breathing from her own Stand loop underneath
+    const mapped = new Set(rb[0].tracks.map((t) => t.name.split('.')[0]));
+    const stand = clipBy('Stand');
+    if (stand) {
+      const baseClip = new THREE.AnimationClip('base', stand.duration, stand.tracks.filter((t) => !mapped.has(t.name.split('.')[0])));
+      body.base = mixer.clipAction(baseClip); body.base.play();
+    }
+    if (EMBED.has('embed')) { body.nextSwitch = 0; body.idle(); }
+  },
+  pool() {
+    const style = STYLE[body.moodName] || 'neutral';
+    if (body.talking) return RB.talk[style] || RB.talk.neutral;
+    if (body.thinking) return ['gestic_thoughtful_01', ...RB.listen.neutral];
+    if (body.listening) return RB.listen[style] || RB.listen.neutral;
+    return [...RB.idle, ...(RB.idleMood[body.moodName] || []), ...(RB.idleMood[body.moodName] || [])];
+  },
+  idle(force = true) {
+    if (performance.now() < body.gestureUntil) return;
+    if (!body.rb) { body.play(body.talking ? clipBy(TALKS[Math.floor(Math.random() * 2)]) : clipBy('Stand')); return; }
+    const choices = body.pool().map((n) => body.rbClip(n)).filter(Boolean);
+    const options = choices.filter((c) => c.name !== body.current);
+    const clip = pick(options.length ? options : choices);
+    if (!clip) return;
+    if (!force && clip.name === body.current) return;
+    body.play(clip, false, 0.7);
+    // talking changes posture every few seconds, idling more slowly
+    body.nextSwitch = performance.now() + (body.talking ? 4000 + Math.random() * 4000 : 7000 + Math.random() * 8000);
+  },
+  gesture(word) {
+    const names = body.rb && RB.gesture[word];
+    const c = names ? body.rbClip(pick(names)) : clipBy(GESTURES[word] || '');
+    if (!c) return;
+    body.play(c, true, 0.4);
+    body.gestureUntil = performance.now() + Math.min(c.duration, 5) * 1000 - 400; // long gestures are cut short
+  },
+  speaking(on) { body.talking = on; if (performance.now() >= body.gestureUntil) body.idle(); },
+  listen(on) { if (body.listening === on) return; body.listening = on; if (!body.talking) body.idle(); },
+  think(on) { if (body.thinking === on) return; body.thinking = on; if (!body.talking) body.idle(); },
+  mood(name, strength = 0.5) {
+    if (name && name !== body.moodName) { body.moodName = name; body.nextSwitch = Math.min(body.nextSwitch, performance.now() + 800); }
+    cyan.set(MOOD_TINT[name] || '#3fe0ff');
+    bloom.strength = 0.5 + 0.35 * strength * (['excited', 'happy', 'playful', 'proud'].includes(name) ? 1 : 0.4);
+  },
+  level(v) { bloom.radius = 0.55 + v * 0.25; }, // voice level makes the glow breathe
+};
+if (EMBED.has('embed')) {
+  for (const el of [document.querySelector('aside'), document.getElementById('actions'), document.getElementById('title'), document.getElementById('viewbar')])
+    el.style.display = 'none'; // hidden, not removed: apply() still reads the controls
+  document.getElementById('app').style.gridTemplateColumns = '1fr';
+  if (EMBED.get('holo') !== '0') document.getElementById('holo').click();
+  const startView = EMBED.get('view') || 'full';
+  const wait = setInterval(() => { if (mixer) { clearInterval(wait); resize(); setView(startView); body.idle(); } }, 200);
+  // when a one-shot gesture ends, go back; and keep changing posture so nothing loops visibly
+  setInterval(() => {
+    if (!mixer) return;
+    const now = performance.now();
+    if (body.gestureUntil && now >= body.gestureUntil) { body.gestureUntil = 0; body.idle(); return; }
+    if (!body.gestureUntil && body.nextSwitch && now >= body.nextSwitch) body.idle();
+  }, 150);
+}
+window.__lyra = { groups, look, U, setView, body };
+</script>
+</body>
+</html>

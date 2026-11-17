@@ -1,0 +1,27 @@
+# secrets
+**/.env
+**/.env.*
+
+# her memories and runtime data (conversations, contacts, journal, music library)
+companion/data/
+lyra-runtime/data/
+
+# installed / downloaded / rebuildable
+**/node_modules/
+lyra-runtime/models/
+customizer/models/*.glb
+*.blend
+*.blend1
+model/
+mesh/
+refs/
+
+# the WoW-based model is for private use only and never goes in a public repo
+**/humanfemale_hd.glb
+**/wowtex*
+
+# misc
+**/__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

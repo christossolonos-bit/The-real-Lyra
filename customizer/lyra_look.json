@@ -1,0 +1,25 @@
+{
+  "model": "models/humanfemale_hd.glb",
+  "hair": 12,
+  "head": 2,
+  "ears": 2,
+  "piercing": 0,
+  "necklace": 0,
+  "hairColor": "#7a4524",
+  "hairBright": 2,
+  "skin": "#ffffff",
+  "eye": "Original",
+  "outfit": "#0f5b6b",
+  "anim": "Stand (ID 0 variation 0)",
+  "parts": {
+    "Belt": 1,
+    "Chest": 0,
+    "Pants": 0
+  },
+  "outfitStyle": "lyra",
+  "top": "#0f5b6b",
+  "pants": "#14353d",
+  "shoes": "#123038",
+  "neckline": 0,
+  "neck": 1
+}
