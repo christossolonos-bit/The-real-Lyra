@@ -9,7 +9,19 @@ import { transcribe as transcribeFish } from './fishAudio.js';
 // When Groq rate-limits, it's skipped until the limit resets: every failed request costs a round
 // trip before the fallback, which is real lag in a voice call.
 let groqPausedUntil = 0;
+// Lyra: her ears (companion/ears/ears.py) run faster-whisper small.en on the GPU, which hears names and
+// commands far better than whisper-base. They take the same 48 kHz mono 16-bit PCM. If they aren't
+// running, the usual path below is used.
+const EARS_URL = process.env.EARS_URL || 'http://127.0.0.1:8772/transcribe';
+async function transcribeEars(pcm48k) {
+  const res = await fetch(EARS_URL, { method: 'POST', body: pcm48k, headers: { 'Content-Type': 'application/octet-stream' }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`ears ${res.status}`);
+  return clean(String((await res.json()).text || ''));
+}
 export async function transcribeSpeech(pcm48k) {
+  if (EARS_URL !== 'off') {
+    try { return await transcribeEars(pcm48k); } catch { /* ears not running: fall back */ }
+  }
   if (config.stt === 'fish') return clean(await transcribeFish(toWav(pcm48k, 48000)));
   if (config.stt === 'groq' && config.groq.apiKey && Date.now() >= groqPausedUntil) {
     try {

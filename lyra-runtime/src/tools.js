@@ -862,6 +862,8 @@ function allRequired(def) {
 // Someone asking for music: "play...", "put on...", "a song", "some music", "queue", "sing", "yes" to her offer...
 const MUSIC_ASK = /\b(play|put (it |something |that |this )?on|queue|song|songs|music|track|tune|playlist|spotify|radio|sing|make (me |us )?(a |some )?(song|beat|track)|yes|yeah|yep|sure|go ahead|do it|please)\b/i;
 
+const STOP_ASK = /\b(stop|pause|turn (it |that |this |the music |the song )?off|shut (it |that )?(off|down)|kill (it|that|the music|the song)|enough|no more music|silence)\b/i;
+
 export async function runTool(name, args = {}, ctx = {}) {
   const tool = TOOLS[name];
   const started = Date.now();
@@ -877,6 +879,10 @@ export async function runTool(name, args = {}, ctx = {}) {
     // Lyra (Chris, 2026-11-17): she put songs on in voice calls without anyone asking. Starting music
     // (playing, queueing, making or singing a song) now needs the person she's answering to have asked
     // for it in this very message. Pausing, skipping and stopping always work.
+    // ...and when someone says "stop" but her brain picks "play", it becomes a stop.
+    if (name === 'music' && ['play', 'queue'].includes(String(parsed.action || 'play')) && STOP_ASK.test(String(ctx.userText || ''))) {
+      parsed = { action: 'stop' };
+    }
     const startsMusic =
       (name === 'music' && ['play', 'queue'].includes(String(parsed.action || 'play'))) ||
       name === 'generate_music' || name === 'sing';

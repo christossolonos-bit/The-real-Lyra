@@ -147,6 +147,17 @@ export function leaveChannel(guildId) {
   return true;
 }
 
+// Her name as Whisper actually hears it ("Lyra" often comes out as Lara, Laura, Lira...).
+const WAKE_ALIASES = { lyra: ['lyra', 'lira', 'lara', 'laura', 'lyre', 'leera', 'lyrah', 'liera', 'lear'] };
+function addressed(text) {
+  const w = config.voice.wakeWord;
+  if (!w) return true;
+  const names = WAKE_ALIASES[w] ?? [w];
+  return new RegExp(String.raw`\b(${names.join('|')})\b`, 'i').test(text);
+}
+// "Lyra, stop" / "turn it off" / "pause the music" / "enough"...
+const MUSIC_STOP = /\b(stop|pause|turn (it |that |this |the music |the song )?off|shut (it |that )?(off|down)|kill (it|that|the music|the song)|enough|no more music|silence)\b/i;
+
 class VoiceSession {
   constructor(connection, voiceChannel, textChannel) {
     this.connection = connection;
@@ -249,7 +260,18 @@ class VoiceSession {
     this.lastHeard = Date.now(); // anyone talking, to her or not: she won't speak up over a conversation
     if (config.voice.postTranscripts) this.post(`🎙️ **${speaker.name}:** ${text}`);
 
-    if (config.voice.wakeWord && !text.toLowerCase().includes(config.voice.wakeWord)) {
+    // Lyra (Chris, 2026-11-17): "I tell her to stop the song, she says ok and then resumes it." Her brain
+    // sometimes picked "play" for "stop". Stopping music with her name is now handled here, without the brain.
+    if (addressed(text) && MUSIC_STOP.test(text) && this.music.on) {
+      this.stopMusic();
+      addMessage(this.conversation, { role: 'user', userId, name: speaker.name, content: text });
+      addMessage(this.conversation, { role: 'assistant', content: 'Stopped the music.' });
+      activity('music', { action: 'stop', by: speaker.name, how: 'voice command' });
+      this.say('Stopped.');
+      return;
+    }
+
+    if (config.voice.wakeWord && !addressed(text)) {
       // Not addressed to us, but keep it as context for the next time we are.
       addMessage(this.conversation, { role: 'user', userId, name: speaker.name, content: text });
       activity('heard', { conversation: this.conversation, voice: true, speaker: speaker.name, userId, text, ignored: true });
