@@ -25,3 +25,6 @@ refs/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# her logs
+companion/logs/

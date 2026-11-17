@@ -36,5 +36,5 @@ echo [*] Starting... (close this window or press Ctrl+C to quit completely)
 node src/index.js
 echo.
 echo [!] Bot stopped. Restarting in 5 seconds - close the window to quit.
-timeout /t 5 /nobreak >nul
+ping -n 6 127.0.0.1 >nul
 goto run
