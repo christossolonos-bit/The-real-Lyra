@@ -85,10 +85,62 @@ const FEEL_TO_MOOD = { joy: "happy", amused: "playful", fond: "tender", playful:
   disgusted: "annoyed", bored: "calm", tired: "calm", determined: "proud", scared: "worried", calm: "calm" };
 const GESTURE_MAP = { nod: "nod", shake: "shake", laugh: "laugh", shrug: "shrug", tilt: "think", eyeroll: "shake", wink: "laugh", gasp: null, sigh: null };
 let runtimeUp = null; // last known: true / false
+
+// ---------- her eyes (webcam, read in the page by public/eyes.js) ----------
+// Faces she knows are stored as fingerprints only (128 numbers each), never pictures.
+const FACES_FILE = path.join(mind.DATA_DIR, "faces.json");
+const faces = { load() { try { return JSON.parse(fs.readFileSync(FACES_FILE, "utf8")); } catch { return { people: [] }; } },
+  save(d) { fs.writeFileSync(FACES_FILE, JSON.stringify(d)); } };
+// What she sees right now. The snapshot lives in memory only and is replaced every few seconds.
+const vision = { cameraOn: false, present: [], unknown: false, main: null, at: 0, snapshot: null, snapshotAt: 0 };
+const visionFresh = () => vision.cameraOn && Date.now() - vision.at < 15000;
+const LOOK = /\b(look at|can you see|do you see|what do you see|what am i (holding|wearing|doing)|what('s| is) (this|that) in my hand|how do i look|check (this|me) out|see (this|me|my)|look\b)/i;
+
+// Her vision model describes a snapshot (only when someone asks her to look).
+async function describeSnapshot(question, who) {
+  if (!vision.snapshot || Date.now() - vision.snapshotAt > 10000) return null;
+  const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: MODEL, max_tokens: 220, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
+      messages: [{ role: "user", content: [
+        { type: "text", text: `This is a live webcam picture of ${who} sitting in front of a computer. They just said: "${question}". ` +
+          `Describe plainly and accurately what's visible that matters for that: what they're holding, wearing or doing, their expression, and anything notable around them. 2 to 4 short sentences. Don't guess beyond what you can see.` },
+        { type: "image_url", image_url: { url: vision.snapshot } },
+      ] }],
+    }),
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!res.ok) throw new Error(`vision ${res.status}`);
+  return ((await res.json()).choices?.[0]?.message?.content || "").trim() || null;
+}
+
+// "What you see" in plain words for her mind.
+async function seesText(name, text) {
+  if (!vision.cameraOn) return "";
+  if (!visionFresh()) return "Your camera is on, but you've lost the picture for a moment.";
+  const lines = [];
+  const others = vision.present.filter((n) => n !== name);
+  if (!vision.main) lines.push("Nobody is in front of the screen right now.");
+  else {
+    const who = vision.main.name || "someone you don't recognise";
+    lines.push(`${who === name ? `${name} (who you're talking to)` : who} is in front of the screen: ${vision.main.expression}; ${vision.main.attention}.`);
+  }
+  if (others.length) lines.push(`Also here: ${others.join(", ")}.`);
+  if (vision.unknown) lines.push("There's someone you don't recognise in view as well.");
+  if (text && LOOK.test(text)) {
+    try { const d = await describeSnapshot(text, name); if (d) lines.push(`You just looked closely. You see: ${d}`); }
+    catch (e) { lines.push(`(You tried to look closely, but the picture didn't come through: ${e.message}.)`); }
+  }
+  return lines.join("\n");
+}
+
 async function runtimeTurn({ name, isOwner, text, cue }) {
+  const sees = await seesText(name, text);
   const res = await fetch(`${RUNTIME}/api/lyra/turn`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, isOwner, text, cue }), signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({ name, isOwner, text, cue, sees }), signal: AbortSignal.timeout(120000),
   });
   if (!res.ok) throw new Error(`runtime ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const r = await res.json();
@@ -181,7 +233,11 @@ const routes = {
     if (!earsListen()) return { error: "not listening right now" };
     const text = String(b.text || "").trim().slice(0, 1200);
     if (!text) return { error: "empty" };
-    const { name, isOwner } = who(b);
+    let { name, isOwner } = who(b);
+    // The PC mic is Chris's, unless her eyes see someone she knows sitting there without him (Dad visiting...).
+    if (visionFresh() && vision.main?.name && vision.main.name !== mind.OWNER && !vision.present.includes(mind.OWNER)) {
+      name = vision.main.name; isOwner = false;
+    }
     mind.arrive(name);
     broadcast("heard", { text, who: name });
     turn({ name, isOwner, text, content: `[${clock()}] ${text}` })
@@ -194,6 +250,50 @@ const routes = {
   // the page tells us when her voice starts and stops, so the mic never hears her
   "POST /api/speaking": async (b) => { ears.speaking = !!b.on; if (!b.on) ears.speakEnd = Date.now(); return { ok: true }; },
   "POST /api/mic": async (b) => { ears.micOn = !!b.on; broadcast("ears", { connected: earsConnected(), micOn: ears.micOn }); return { micOn: ears.micOn }; },
+  // ---- her eyes ----
+  "POST /api/faces/list": async (b) => (who(b).isOwner ? { people: faces.load().people } : { error: "owner only" }),
+  "POST /api/faces/add": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    const person = String(b.person || "").trim().slice(0, 30);
+    const prints = Array.isArray(b.descriptors) ? b.descriptors.filter((d) => Array.isArray(d) && d.length === 128) : [];
+    if (!person || prints.length < 3) return { error: "need a name and a clear look at the face" };
+    const d = faces.load();
+    const p = d.people.find((x) => x.name.toLowerCase() === person.toLowerCase());
+    if (p) p.descriptors = [...p.descriptors, ...prints].slice(-24); // more angles over time
+    else d.people.push({ name: person, descriptors: prints, addedAt: new Date().toISOString() });
+    faces.save(d);
+    return { ok: true, person, prints: prints.length };
+  },
+  "POST /api/faces/remove": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    const d = faces.load(); d.people = d.people.filter((x) => x.name.toLowerCase() !== String(b.person || "").toLowerCase());
+    faces.save(d); return { ok: true };
+  },
+  "POST /api/seen": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    vision.cameraOn = b.cameraOn !== false; vision.at = Date.now();
+    vision.present = Array.isArray(b.present) ? b.present.slice(0, 8).map(String) : [];
+    vision.unknown = !!b.unknown; vision.main = b.main || null;
+    if (!vision.cameraOn) { vision.snapshot = null; vision.present = []; vision.main = null; }
+    return { ok: true };
+  },
+  "POST /api/seen/snapshot": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    const img = String(b.image || "");
+    if (vision.cameraOn && img.startsWith("data:image/jpeg;base64,") && img.length < 400000) { vision.snapshot = img; vision.snapshotAt = Date.now(); }
+    return { ok: true };
+  },
+  // someone she knows (or a stranger) just came into view
+  "POST /api/arrived": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    const seenName = b.person ? String(b.person).slice(0, 30) : null;
+    const isOwner = seenName === mind.OWNER;
+    const name = seenName || "Visitor";
+    const content = seenName
+      ? `[you see] ${seenName} just came into view of your camera${isOwner ? "" : ` (you know their face${b.firstTime ? " — you only just learned it" : ""})`}. Greet them warmly and naturally, by name, in a sentence or two.`
+      : `[you see] Someone you don't recognise just came into view of your camera. Say hello in a friendly way and ask who they are, in a sentence or two.`;
+    return turn({ name, isOwner, content, cue: true, logAs: `[${clock()}] (${name} came into view)` });
+  },
   "POST /api/runtime": async () => {
     const up = await fetch(`${RUNTIME}/api/status`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok).catch(() => false);
     return { up, url: `${RUNTIME}/` };
@@ -221,7 +321,7 @@ http.createServer(async (req, res) => {
   const key = `${req.method} ${url.pathname}`;
   if (routes[key]) {
     let body = "";
-    req.on("data", (c) => { body += c; if (body.length > 20000) req.destroy(); });
+    req.on("data", (c) => { body += c; if (body.length > 800000) req.destroy(); });
     req.on("end", async () => {
       let out;
       try { out = await routes[key](JSON.parse(body || "{}")); } catch (e) { console.error(e); out = { error: e.message }; }

@@ -483,6 +483,7 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta(); U.uTime.value += dt;
   mixer?.update(dt);
+  body?.applyGaze?.(dt); // eye contact, on top of whatever she's playing
   if (spin && model) model.rotation.y += dt * 0.5;
   controls.update();
   if (holo) composer.render(); else renderer.render(scene, camera);
@@ -582,6 +583,36 @@ const body = {
     bloom.strength = 0.5 + 0.35 * strength * (['excited', 'happy', 'playful', 'proud'].includes(name) ? 1 : 0.4);
   },
   level(v) { bloom.radius = 0.55 + v * 0.25; }, // voice level makes the glow breathe
+  // ---- eye contact: her head and neck turn toward the face her webcam sees ----
+  gaze: { yaw: 0, pitch: 0, tYaw: 0, tPitch: 0, lastSeen: 0 },
+  lookAt(g) {
+    const z = body.gaze;
+    if (!g) return; // nobody: drift back to looking ahead (see applyGaze)
+    // webcam picture is not mirrored: a face on the picture's left is on HER right
+    z.tYaw = THREE.MathUtils.clamp((0.5 - g.x) * 1.1, -0.5, 0.5);
+    z.tPitch = THREE.MathUtils.clamp((g.y - 0.42) * 0.7, -0.3, 0.3);
+    z.lastSeen = performance.now();
+  },
+  applyGaze(dt) {
+    if (!model) return;
+    const z = body.gaze;
+    if (performance.now() - z.lastSeen > 2500) { z.tYaw = 0; z.tPitch = 0; }
+    const k = 1 - Math.exp(-dt * 4); // smooth, like a real head turn
+    z.yaw += (z.tYaw - z.yaw) * k; z.pitch += (z.tPitch - z.pitch) * k;
+    if (Math.abs(z.yaw) < 1e-3 && Math.abs(z.pitch) < 1e-3) return;
+    body._head ??= model.getObjectByName('bone_Head');
+    body._neck ??= model.getObjectByName('bone_EXP_C1_Neck1');
+    model.updateMatrixWorld(true);
+    for (const [bone, share] of [[body._neck, 0.35], [body._head, 0.65]]) {
+      if (!bone) continue;
+      const parentQ = bone.parent.getWorldQuaternion(new THREE.Quaternion());
+      const turn = new THREE.Quaternion().setFromEuler(new THREE.Euler(z.pitch * share, z.yaw * share, 0, 'YXZ'));
+      // a world-space turn, expressed in the bone's own space
+      const local = parentQ.clone().invert().multiply(turn).multiply(parentQ);
+      bone.quaternion.premultiply(local);
+      bone.updateMatrixWorld(true);
+    }
+  },
 };
 if (EMBED.has('embed')) {
   for (const el of [document.querySelector('aside'), document.getElementById('actions'), document.getElementById('title'), document.getElementById('viewbar')])

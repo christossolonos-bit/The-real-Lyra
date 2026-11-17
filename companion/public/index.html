@@ -35,6 +35,18 @@
   #gate button{width:100%;padding:10px;background:var(--cyan2);border-color:var(--cyan)}
   #status{color:var(--muted);font-size:12px;min-width:70px;text-align:right}
   @media (max-width:700px){ #log{width:auto;left:16px;top:56px;bottom:150px} }
+  #people{position:fixed;inset:0;display:none;place-items:center;background:rgba(3,7,11,.7);backdrop-filter:blur(3px);z-index:6}
+  #people.open{display:grid}
+  #people .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px 20px;width:min(420px,92vw)}
+  #people h3{margin:0 0 4px;letter-spacing:.2em;color:var(--cyan);font-weight:600;font-size:14px}
+  #people p{color:var(--muted);margin:0 0 12px;font-size:13px}
+  #people ul{list-style:none;margin:0 0 12px;padding:0}
+  #people li{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)}
+  #people .row{display:flex;gap:8px}
+  #people input{flex:1;background:#0a141b;border:1px solid var(--line);border-radius:10px;color:var(--text);font:inherit;padding:8px}
+  #learnBar{height:4px;background:#0a141b;border-radius:4px;margin-top:10px;overflow:hidden}
+  #learnBar div{height:100%;width:0;background:var(--cyan);transition:width .3s}
+  #eyes.on{background:#0e7a92;border-color:var(--cyan);box-shadow:0 0 14px #3fe0ff66}
 </style>
 </head>
 <body>
@@ -48,10 +60,21 @@
   <button id="send">Send</button>
   <span class="chip" id="earsChip">mic: starting…</span>
   <button id="view" title="Full body / close-up">Close-up</button>
+  <button id="eyes" title="Her eyes: turn the webcam on or off">👁 Eyes</button>
+  <button id="peopleBtn" title="Faces she knows">People</button>
   <button id="creator" title="Open the character creator in its own window">Creator</button>
   <button id="dash" title="Open Lyra's dashboard (Discord and more) in its own window">Dashboard</button>
   <span id="status"></span>
 </div>
+<div id="people"><div class="card">
+  <h3>FACES SHE KNOWS</h3>
+  <p>She recognises these people through her eyes. Only a face fingerprint (numbers) is saved, never a picture.</p>
+  <ul id="peopleList"></ul>
+  <div class="row"><input id="personName" placeholder="Name (e.g. Chris, Dad)" maxlength="30"><button id="learn">Learn face</button></div>
+  <div id="learnBar"><div></div></div>
+  <p id="learnMsg" style="margin-top:8px"></p>
+  <div class="row" style="justify-content:flex-end;margin-top:6px"><button id="peopleClose">Done</button></div>
+</div></div>
 <div id="gate"><div class="card">
   <h2>LYRA</h2>
   <p id="gateText">Who's there?</p>
@@ -200,9 +223,71 @@ $('wake').onclick = async () => {
     me.name = n; store.set('lyra-name', n); $('whoChip').textContent = `visitor · ${n}`;
   }
   setupAudio(); actx.resume(); $('gate').remove(); awake = true; nextQuiet();
+  if (me.isOwner && store.get('lyra-eyes') === '1') eyesOn(true);
   await exchange('/api/hello');
 };
 $('gateName').onkeydown = (e) => { if (e.key === 'Enter') $('wake').click(); };
+
+// ---- her eyes (webcam) ----
+let eyes = null;
+function eyesChip(info) {
+  const c = $('whoChip');
+  if (!eyes?.running) { c.textContent = me.isOwner ? 'private · Chris' : `visitor · ${me.name}`; return; }
+  if (!info) return;
+  const m = info.main;
+  const whoSees = m ? `${m.name || 'someone new'} · ${m.expression}` : 'nobody in view';
+  c.textContent = `👁 ${whoSees}${info.present.length > 1 ? ` · +${info.present.length - 1}` : ''}`;
+}
+async function eyesOn(on) {
+  try {
+    if (on) {
+      if (!eyes) {
+        const { createEyes } = await import('/eyes.js');
+        eyes = createEyes({
+          api,
+          onStatus: (s) => { $('eyes').classList.toggle('on', s === 'on'); if (s !== 'on' && s !== 'off') $('whoChip').textContent = `👁 ${s}`; if (s === 'off') eyesChip(); },
+          onChange: eyesChip,
+          onGaze: (g) => lyraBody()?.lookAt?.(g),
+          onArrive: async (person) => {
+            if (!awake || busy || speaking) return;
+            await exchange('/api/arrived', { person });
+          },
+        });
+      }
+      await eyes.start();
+    } else eyes?.stop();
+    store.set('lyra-eyes', on ? '1' : '0');
+  } catch (e) { add('note', `Her eyes couldn't open: ${e.message}`); $('eyes').classList.remove('on'); }
+}
+$('eyes').onclick = () => eyesOn(!(eyes?.running));
+
+// ---- People panel ----
+async function renderPeople() {
+  const r = await api('/api/faces/list');
+  const list = r.people || [];
+  $('peopleList').innerHTML = list.length ? '' : '<li style="color:var(--muted)">Nobody yet. Start with yourself.</li>';
+  for (const p of list) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${p.name.replace(/[<>&]/g, '')} <span style="color:var(--muted);font-size:12px">· ${p.descriptors.length} views</span></span>`;
+    const del = document.createElement('button'); del.textContent = 'Forget';
+    del.onclick = async () => { if (!confirm(`Forget ${p.name}'s face?`)) return; if (eyes) await eyes.forget(p.name); else await api('/api/faces/remove', { person: p.name }); renderPeople(); };
+    li.append(del); $('peopleList').append(li);
+  }
+}
+$('peopleBtn').onclick = () => { $('people').classList.add('open'); renderPeople(); };
+$('peopleClose').onclick = () => $('people').classList.remove('open');
+$('learn').onclick = async () => {
+  const name = $('personName').value.trim();
+  if (!name) { $('personName').focus(); return; }
+  try {
+    if (!eyes?.running) await eyesOn(true);
+    $('learnMsg').textContent = `Look at the camera, ${name}. Turn your head a little left and right…`;
+    await eyes.learn(name, (f) => { $('learnBar').firstElementChild.style.width = `${Math.round(f * 100)}%`; });
+    $('learnMsg').textContent = `She knows ${name} now. Learning again adds more angles.`;
+    $('personName').value = ''; renderPeople();
+  } catch (e) { $('learnMsg').textContent = e.message; }
+  setTimeout(() => { $('learnBar').firstElementChild.style.width = '0'; }, 1500);
+};
 </script>
 </body>
 </html>

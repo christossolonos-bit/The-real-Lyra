@@ -359,8 +359,11 @@ function buildRoutes(bot) {
         systemExtra: [
           `Right now you're talking through your hologram on Chris's computer${isOwner ? ', with Chris himself' : `, with ${name}, a visitor at the campus terminal`}. ` +
             `Whatever you say is spoken out loud in your voice, so keep it to plain spoken sentences.`,
+          // what her webcam eyes see (who's there, their expressions, a described snapshot when someone asked her to look)
+          body.sees ? `WHAT YOU SEE through your camera right now (real, live):\n${String(body.sees).slice(0, 1500)}\n` +
+            `Use it naturally, like someone in the room would: notice smiles, tiredness, who's there. Don't narrate it constantly or list it.` : '',
           emotion.emotionPrompt(key),
-        ].join('\n\n'),
+        ].filter(Boolean).join('\n\n'),
       });
       const said = sentences.join(' ').trim() || emotion.stripTags(reply || '');
       return { reply: said, feelings, gestures: [...new Set(gestures)] };
