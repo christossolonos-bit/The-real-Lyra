@@ -859,6 +859,9 @@ function allRequired(def) {
 
 // Every call is logged as one line (tool, ok or error, how long, the action) for tuning and
 // post-mortems. Arguments and results aren't logged, since they can hold file contents.
+// Someone asking for music: "play...", "put on...", "a song", "some music", "queue", "sing", "yes" to her offer...
+const MUSIC_ASK = /\b(play|put (it |something |that |this )?on|queue|song|songs|music|track|tune|playlist|spotify|radio|sing|make (me |us )?(a |some )?(song|beat|track)|yes|yeah|yep|sure|go ahead|do it|please)\b/i;
+
 export async function runTool(name, args = {}, ctx = {}) {
   const tool = TOOLS[name];
   const started = Date.now();
@@ -871,6 +874,16 @@ export async function runTool(name, args = {}, ctx = {}) {
   }
   try {
     parsed = typeof args === 'string' ? JSON.parse(args || '{}') : args ?? {};
+    // Lyra (Chris, 2026-11-17): she put songs on in voice calls without anyone asking. Starting music
+    // (playing, queueing, making or singing a song) now needs the person she's answering to have asked
+    // for it in this very message. Pausing, skipping and stopping always work.
+    const startsMusic =
+      (name === 'music' && ['play', 'queue'].includes(String(parsed.action || 'play'))) ||
+      name === 'generate_music' || name === 'sing';
+    if (startsMusic && !MUSIC_ASK.test(String(ctx.userText || ''))) {
+      log(false, 'music not asked for');
+      return structured(name, "Error: nobody asked for music in this message. Only play, queue or make songs when someone asks you to; you can offer, then wait for their yes.", ctx, parsed);
+    }
     const result = String(await tool.run(parsed, ctx));
     log(!result.startsWith('Error'), result.startsWith('Error') ? result.slice(7, 160) : undefined);
     return structured(name, result, ctx, parsed);

@@ -295,7 +295,7 @@ class VoiceSession {
     const target = want.bucket === 'loneliness' ? people.find((m) => m.id === want.id) : null;
     const who = target ?? people[0];
     const cues = {
-      restlessness: `You've been restless and want to make something. Offer the people in the call, unprompted and casually, to make something for them: a song, a picture, a little tool, whatever fits what you know about them.`,
+      restlessness: `You've been restless and want to make something. Casually ASK the people in the call whether they'd like you to make something for them: a picture, a little tool, a story, whatever fits what you know about them. Only ask: don't start making it, and never put on, play or make music unless someone asks you to.`,
       usefulness: `Nobody's needed you for a while. Offer, unprompted and casually, to help with something you know they've been working on.`,
       unease: `There's something you left open a while back: "${want.item?.text ?? 'a promise from earlier'}". If it makes sense right now, circle back on it briefly, unprompted; if it really doesn't fit the moment, say something small and natural instead and leave it.`,
       loneliness: `You've missed ${who.displayName}, who's here in the call and said you're welcome to check in on them. Check in on them warmly, unprompted, and ask about their thing. Use what you remember and their check-in note.`,
