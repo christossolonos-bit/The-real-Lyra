@@ -48,6 +48,7 @@
   <button id="send">Send</button>
   <span class="chip" id="earsChip">mic: starting…</span>
   <button id="view" title="Full body / close-up">Close-up</button>
+  <button id="creator" title="Open the character creator in its own window">Creator</button>
   <button id="dash" title="Open Lyra's dashboard (Discord and more) in its own window">Dashboard</button>
   <span id="status"></span>
 </div>
@@ -164,7 +165,13 @@ function connectEvents() {
 }
 connectEvents();
 
-$('dash').onclick = () => window.open('http://127.0.0.1:3010/', 'lyra-dashboard', 'width=1280,height=880');
+$('creator').onclick = () => { const w = window.open('/creator/', 'lyra-creator', 'width=1280,height=880'); if (!w) location.assign('/creator/'); };
+$('dash').onclick = async () => {
+  const r = await fetch('/api/runtime', { method: 'POST' }).then((x) => x.json()).catch(() => ({ up: false }));
+  if (!r.up) { add('note', "Her mind (the dashboard) isn't running yet. Start Lyra.bat starts it, and it takes about 20 seconds to wake. Try again in a moment."); return; }
+  const w = window.open(r.url, 'lyra-dashboard', 'width=1280,height=880');
+  if (!w) add('note', `Your browser blocked the window. Open ${r.url} yourself.`);
+};
 let close = false;
 $('view').onclick = () => { close = !close; $('avatar').contentWindow.__lyra?.setView(close ? 'upper' : 'full'); $('view').textContent = close ? 'Full body' : 'Close-up'; };
 

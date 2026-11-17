@@ -27,7 +27,7 @@ echo [*] Registering slash commands...
 call npm run deploy --silent || echo [!] Command registration failed, starting anyway.
 
 rem ---- Dashboard opens once the bot is up ----
-start "" /min cmd /c "timeout /t 8 /nobreak >nul & start http://127.0.0.1:%DASHBOARD_PORT%"
+if not defined LYRA_QUIET_START start "" /min cmd /c "timeout /t 8 /nobreak >nul & start http://127.0.0.1:%DASHBOARD_PORT%"
 
 rem ---- Bot + dashboard (restarts itself if it crashes) ----
 rem Turning the bot off in the dashboard keeps this running so you can turn it back on.

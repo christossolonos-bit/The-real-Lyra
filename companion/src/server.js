@@ -194,6 +194,10 @@ const routes = {
   // the page tells us when her voice starts and stops, so the mic never hears her
   "POST /api/speaking": async (b) => { ears.speaking = !!b.on; if (!b.on) ears.speakEnd = Date.now(); return { ok: true }; },
   "POST /api/mic": async (b) => { ears.micOn = !!b.on; broadcast("ears", { connected: earsConnected(), micOn: ears.micOn }); return { micOn: ears.micOn }; },
+  "POST /api/runtime": async () => {
+    const up = await fetch(`${RUNTIME}/api/status`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok).catch(() => false);
+    return { up, url: `${RUNTIME}/` };
+  },
   "POST /api/whoami": async (b) => ({ ...who(b), ownerConfigured: !!OWNER_KEY }),
   "POST /api/mind": async (b) => (who(b).isOwner ? mind.snapshot() : { error: "owner only" }),
 };

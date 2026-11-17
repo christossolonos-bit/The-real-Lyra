@@ -10,7 +10,19 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8770 .*LISTENING"') d
   echo Restarting Lyra...
   taskkill /pid %%p /f >nul 2>&1
 )
+rem ...and her old ears, so there's never two of them listening
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":8772 .*LISTENING"') do (
+  taskkill /pid %%p /f >nul 2>&1
+)
 timeout /t 1 >nul
+
+rem Her mind (lyra-runtime: memory, Discord, dashboard on :3010). Starts in its own window if it isn't running.
+netstat -ano | findstr /r /c:":3010 .*LISTENING" >nul
+if errorlevel 1 (
+  echo Waking her mind...
+  set LYRA_QUIET_START=1
+  start "Lyra mind - runtime and dashboard" cmd /c call "%~dp0..\lyra-runtime\start.bat"
+)
 
 rem Her ears: listens on the PC microphone, transcribes locally (free). Own window.
 start "Lyra ears - PC microphone" cmd /k python -u ears\ears.py
