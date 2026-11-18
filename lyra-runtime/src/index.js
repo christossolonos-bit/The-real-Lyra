@@ -34,6 +34,11 @@ startPressure();
 // Sleep + dreams: she won't turn in while people are in a voice call with her.
 sleep.setCompany(() => [...sessions.values()].some((s) => !s.destroyed && (s.humans?.()?.length ?? 0) > 0));
 sleep.setDreamer(dreams);
+// Lyra Core consolidates (merges, forgets, reasons new beliefs) as she falls asleep, and daily anyway.
+const { core, consolidateIfDue } = await import('./core/index.js');
+const coreLog = (r) => activity('core', { message: `Core consolidated: merged ${r.merged}, forgot ${r.forgotCases + r.forgotPhrases + r.forgotBeliefs}, concluded ${r.concluded.length}`, ...r });
+sleep.setOnAsleep(() => { try { coreLog(core.consolidate()); } catch (err) { activity('error', { where: 'core sleep', message: err.message }); } });
+setInterval(() => { try { consolidateIfDue(coreLog); } catch {} }, 6 * 3_600_000).unref();
 sleep.start();
 activity('sleep', { message: 'Sleep cycles armed' });
 

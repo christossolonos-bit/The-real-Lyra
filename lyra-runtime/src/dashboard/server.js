@@ -258,6 +258,9 @@ function buildRoutes(bot) {
     })),
     r('GET', '/api/context/turns', () => []),
     r('GET', '/api/context/turn', () => null),
+    // Lyra Core: her own learning system's scoreboard (/core.html)
+    r('GET', '/api/core', async () => (await import('../core/index.js')).core.stats()),
+    r('POST', '/api/core/consolidate', async () => (await import('../core/index.js')).core.consolidate()),
     r('GET', '/api/life', async () => (await import('../life-view.js')).lifeView()),
     r('GET', '/api/journal', async () => {
       const { JOURNAL_DIR } = await import('../journal.js');

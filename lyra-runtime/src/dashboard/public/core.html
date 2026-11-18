@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Core</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --warn:#c27c0e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --warn:#f0b445; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:14px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header button { margin-left:auto; background:var(--accent); color:#001; border:0; border-radius:8px; padding:7px 12px; font:inherit; cursor:pointer; }
+  main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .mode { color:var(--muted); margin:0; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .tile b { display:block; font-size:28px; font-variant-numeric:tabular-nums; }
+  .tile span { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:6px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .bar { height:8px; background:var(--border); border-radius:4px; overflow:hidden; min-width:80px; }
+  .bar i { display:block; height:100%; background:var(--accent); }
+  .ready { color:var(--good); font-weight:600; } .learning { color:var(--warn); }
+  .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .pair small { color:var(--muted); display:block; font-size:12px; }
+  .why { color:var(--muted); font-size:12px; }
+  .empty { color:var(--muted); }
+  .scroll { overflow-x:auto; }
+  @media (max-width:640px) { .pair { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <strong>Lyra Core</strong>
+  <span class="mode" id="mode"></span>
+  <button id="sleepBtn" title="Run the overnight pass now: merge, forget, reason">Consolidate now</button>
+</header>
+<main>
+  <section class="card">
+    <div class="tiles">
+      <div class="tile"><b id="t-ex">–</b><span>exchanges learned from</span></div>
+      <div class="tile"><b id="t-handle">–</b><span>of recent replies she could have given herself</span></div>
+      <div class="tile"><b id="t-close">–</b><span>average closeness to Nemotron</span></div>
+      <div class="tile"><b id="t-phr">–</b><span>phrases in her bank</span></div>
+      <div class="tile"><b id="t-size">–</b><span>everything Core knows, on disk</span></div>
+    </div>
+  </section>
+  <section class="card"><h2>What she's learning to say, by kind of moment</h2><div class="scroll" id="skills"></div></section>
+  <section class="card"><h2>Shadow drafts: Core vs Nemotron</h2><div id="recent"></div></section>
+  <section class="card"><h2>Beliefs</h2><div class="scroll" id="beliefs"></div></section>
+  <section class="card"><h2>How she builds replies</h2><div class="scroll" id="shapes"></div></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const kb = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const nice = (s) => String(s).replace(/_/g, ' ');
+const bar = (p) => `<div class="bar"><i style="width:${Math.max(0, Math.min(100, p))}%"></i></div>`;
+
+async function load() {
+  const s = await fetch('/api/core').then((r) => r.json());
+  if (s.error) { $('skills').innerHTML = `<p class="empty">${esc(s.error)}</p>`; return; }
+  $('mode').textContent = s.mode;
+  $('t-ex').textContent = s.exchanges; $('t-handle').textContent = `${s.wouldHaveHandled}%`;
+  $('t-close').textContent = `${s.averageCloseness}%`; $('t-phr').textContent = s.phrases; $('t-size').textContent = kb(s.sizeBytes);
+  $('skills').innerHTML = s.skills.length ? `<table><tr><th>moment</th><th>examples</th><th>closeness</th><th></th><th>status</th></tr>${s.skills.map((k) =>
+    `<tr><td>${esc(nice(k.intent))}</td><td>${k.examples}</td><td>${k.closeness}%</td><td>${bar(k.closeness)}</td><td class="${k.ready ? 'ready' : 'learning'}">${k.ready ? 'ready' : `learning (needs ${Math.max(0, s.ready.examples - k.examples)} more, ${s.ready.closeness}%+)`}</td></tr>`).join('')}</table>`
+    : '<p class="empty">Nothing yet. Talk to her: every reply from Nemotron teaches Core.</p>';
+  $('recent').innerHTML = s.recent.length ? s.recent.map((c) => `<div class="pair">
+      <div><small>Core's secret draft · ${esc(nice(c.intent))} · ${c.closeness}% close</small>${esc(c.core) || '<span class="empty">(nothing learned for this yet)</span>'}</div>
+      <div><small>What Nemotron said</small>${esc(c.teacher)}</div></div>`).join('') : '<p class="empty">No exchanges yet.</p>';
+  $('beliefs').innerHTML = s.beliefs.length ? `<table><tr><th>belief</th><th>sure</th><th>seen</th><th>from</th></tr>${s.beliefs.map((b) =>
+    `<tr><td>${esc(b.subj)} <b>${esc(b.rel)}</b> ${esc(b.obj)}${b.why ? `<div class="why">because ${esc(b.why)}</div>` : ''}</td><td>${b.conf}%</td><td>${b.n}×</td><td>${esc(b.source)}</td></tr>`).join('')}</table>`
+    : '<p class="empty">No beliefs yet. She picks them up from things like "I love sci-fi" or "my dad is called…", and reasons more while she sleeps.</p>';
+  $('shapes').innerHTML = s.shapes.length ? `<table><tr><th>moment</th><th>shape</th><th>times</th></tr>${s.shapes.map((x) => `<tr><td>${esc(nice(x.intent))}</td><td>${esc(x.shape)}</td><td>${x.n}</td></tr>`).join('')}</table>` : '<p class="empty">No shapes yet.</p>';
+}
+$('sleepBtn').onclick = async () => {
+  $('sleepBtn').disabled = true;
+  try { const r = await fetch('/api/core/consolidate', { method: 'POST' }).then((x) => x.json()); alert(`Merged ${r.merged}, forgot ${r.forgotCases + r.forgotPhrases + r.forgotBeliefs}, new conclusions ${r.concluded?.length ?? 0}.`); }
+  finally { $('sleepBtn').disabled = false; load(); }
+};
+load(); setInterval(load, 15000);
+</script>
+</body>
+</html>

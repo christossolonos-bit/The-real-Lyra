@@ -19,6 +19,7 @@ import * as continuity from './continuity.js';
 import { musicAsk, musicArgsFromAsk } from './music.js';
 import { videoId as youtubeVideoId } from './theater-audio.js';
 import { theater } from './theater.js';
+import { core } from './core/index.js';
 
 const VOICE_STYLE = `You are speaking out loud in a voice call. Keep replies short and conversational (usually 1-3 sentences). No markdown, lists, emoji, code blocks, or URLs: everything you write is read aloud by a text-to-speech voice. The user's words come from speech recognition and may contain mistakes; infer what they meant.`;
 
@@ -449,6 +450,16 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   if (!cue) addMessage(conversation, { role: 'user', userId: speaker.id, name: speaker.name, content: text });
   const used = calls.map((c) => `${c.name} ${toolTarget(c.args)}: ${toolFailed(c.result) ? 'failed' : 'ok'}`.replace(/  +/g, ' '));
   if (reply) addMessage(conversation, { role: 'assistant', name: character.main ? null : character.name, content: reply, tools: used.length ? used.join(', ') : null });
+
+  // Lyra Core (her own learning system) watches the teacher: drafts in secret, compares, learns.
+  if (!cue && character.main && reply && speaker.id !== 'dashboard') {
+    try {
+      const learned = core.observe({ speaker, text, reply, tools: calls.map((c) => c.name) });
+      if (learned) activity('core', { intent: learned.intent, closeness: Math.round(learned.score * 100), reward: learned.reward, speaker: speaker.name });
+    } catch (err) {
+      activity('error', { where: 'core', message: err.message });
+    }
+  }
 
   // She's said it, so those are done.
   if (reply) for (const o of due) completeObligation(o.id, voice ? 'said in voice' : 'said in chat', speaker.id);
