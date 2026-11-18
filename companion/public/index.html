@@ -47,6 +47,18 @@
   #learnBar{height:4px;background:#0a141b;border-radius:4px;margin-top:10px;overflow:hidden}
   #learnBar div{height:100%;width:0;background:var(--cyan);transition:width .3s}
   #eyes.on{background:#0e7a92;border-color:var(--cyan);box-shadow:0 0 14px #3fe0ff66}
+  #side{position:fixed;left:18px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px;z-index:3}
+  #side button{display:flex;align-items:center;gap:10px;width:132px;text-align:left;padding:9px 12px}
+  #side .ico{width:18px;text-align:center;font-size:15px;line-height:1}
+  #side hr{border:0;border-top:1px solid var(--line);margin:2px 4px}
+  #bar #earsChip{white-space:nowrap}
+  @media (max-width:820px){
+    #side{top:auto;bottom:84px;transform:none;flex-direction:row;flex-wrap:wrap;left:16px;right:16px;justify-content:center}
+    #side button{width:auto;padding:8px 10px}
+    #side hr{display:none}
+    #heard{bottom:150px}
+  }
+  @media (max-width:600px){ #bar #earsChip{display:none} #bar{gap:6px} }
 </style>
 </head>
 <body>
@@ -59,13 +71,16 @@
   <input id="text" placeholder="Just talk (PC mic), or type here…" autocomplete="off">
   <button id="send">Send</button>
   <span class="chip" id="earsChip">mic: starting…</span>
-  <button id="view" title="Full body / close-up">Close-up</button>
-  <button id="eyes" title="Her eyes: turn the webcam on or off">👁 Eyes</button>
-  <button id="peopleBtn" title="Faces she knows">People</button>
-  <button id="creator" title="Open the character creator in its own window">Creator</button>
-  <button id="dash" title="Open Lyra's dashboard (Discord and more) in its own window">Dashboard</button>
   <span id="status"></span>
 </div>
+<nav id="side" aria-label="Lyra controls">
+  <button id="eyes" title="Her eyes: turn the webcam on or off"><span class="ico">👁</span><span>Eyes</span></button>
+  <button id="peopleBtn" title="Faces she knows"><span class="ico">👥</span><span>People</span></button>
+  <button id="view" title="Full body / close-up"><span class="ico">⤢</span><span>Close-up</span></button>
+  <hr>
+  <button id="creator" title="Open the character creator in its own window"><span class="ico">✎</span><span>Creator</span></button>
+  <button id="dash" title="Open Lyra's dashboard (Discord and more) in its own window"><span class="ico">▦</span><span>Dashboard</span></button>
+</nav>
 <div id="people"><div class="card">
   <h3>FACES SHE KNOWS</h3>
   <p>She recognises these people through her eyes. Only a face fingerprint (numbers) is saved, never a picture.</p>
@@ -196,7 +211,7 @@ $('dash').onclick = async () => {
   if (!w) add('note', `Your browser blocked the window. Open ${r.url} yourself.`);
 };
 let close = false;
-$('view').onclick = () => { close = !close; $('avatar').contentWindow.__lyra?.setView(close ? 'upper' : 'full'); $('view').textContent = close ? 'Full body' : 'Close-up'; };
+$('view').onclick = () => { close = !close; $('avatar').contentWindow.__lyra?.setView(close ? 'upper' : 'full'); $('view').lastElementChild.textContent = close ? 'Full body' : 'Close-up'; };
 
 // ---- her own initiative: after a quiet spell she may speak first ----
 let lastActivity = Date.now(), quietWait = 0, awake = false;
