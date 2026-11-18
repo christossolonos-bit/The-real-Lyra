@@ -15,8 +15,13 @@ const GONE_MS = 8000;       // unseen this long = they left
 const AWAY_MS = 30 * 60e3;  // gone this long and back = a new arrival worth greeting
 
 export function createEyes({ api, onChange, onArrive, onGaze, onStatus }) {
-  const video = Object.assign(document.createElement('video'), { muted: true, playsInline: true });
+  // The video lives in the page as a small live preview ("what she sees"). A video that isn't on the
+  // page can stop getting new frames in Chrome, and then she'd keep seeing the same old picture.
+  const video = Object.assign(document.createElement('video'), { muted: true, playsInline: true, autoplay: true, id: 'eyesView', title: 'What Lyra sees (live)' });
+  document.body.appendChild(video);
   const canvas = document.createElement('canvas');
+  const probe = Object.assign(document.createElement('canvas'), { width: 16, height: 12 });
+  let lastSig = '', sameCount = 0, lastFrameAt = 0, restarting = false;
   let landmarker, stream, running = false, matcher = null, people = [];
   const seen = new Map();   // name -> { last, since, gone }
   let unknownLast = 0, unknownGreeted = 0;
@@ -35,8 +40,7 @@ export function createEyes({ api, onChange, onArrive, onGaze, onStatus }) {
   async function start() {
     if (running) return;
     onStatus?.('waking her eyes…');
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
-    video.srcObject = stream; await video.play();
+    await openCamera();
     if (!landmarker) {
       const files = await FilesetResolver.forVisionTasks(MP_WASM);
       landmarker = await FaceLandmarker.createFromOptions(files, {
@@ -50,21 +54,47 @@ export function createEyes({ api, onChange, onArrive, onGaze, onStatus }) {
     trackLoop(); recogniseLoop(); snapshotLoop();
   }
 
+  async function openCamera() {
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+    video.srcObject = stream; await video.play();
+    video.classList.add('on'); lastFrameAt = Date.now(); sameCount = 0;
+  }
+
+  // a frozen camera gets reopened, so she never keeps describing an old picture
+  async function reopen(why) {
+    if (restarting || !running) return;
+    restarting = true; console.warn('eyes: camera froze, reopening —', why);
+    try { await openCamera(); } catch (e) { console.warn('eyes: reopen failed', e.message); }
+    restarting = false;
+  }
+
+  // cheap fingerprint of the current frame; a live webcam always has a little noise
+  function frameSig() {
+    const c = probe.getContext('2d', { willReadFrequently: true });
+    c.drawImage(video, 0, 0, 16, 12);
+    const d = c.getImageData(0, 0, 16, 12).data; let h = 0;
+    for (let i = 0; i < d.length; i += 4) h = (h * 31 + d[i] + d[i + 1] * 3 + d[i + 2] * 7) >>> 0;
+    return String(h);
+  }
+
   function stop() {
-    running = false; stream?.getTracks().forEach((t) => t.stop()); stream = null;
+    running = false; stream?.getTracks().forEach((t) => t.stop()); stream = null; video.classList.remove('on');
     seen.clear(); face = null; onStatus?.('off');
     api('/api/seen', { cameraOn: false });
   }
 
   // ---- detailed face reading: expressions, head pose, where they are ----
-  let lastT = -1;
+  let lastT = -1, lastVT = -1;
   function trackLoop() {
     if (!running) return;
-    requestAnimationFrame(trackLoop);
+    setTimeout(trackLoop, 66); // ~15 fps; a timer keeps going when the window is behind others
     const now = performance.now();
-    if (now - lastT < 66 || video.readyState < 2) return; // ~15 fps
+    if (video.readyState < 2 || now <= lastT) return;
+    if (video.currentTime !== lastVT) { lastVT = video.currentTime; lastFrameAt = Date.now(); }
     lastT = now;
-    const res = landmarker.detectForVideo(video, now);
+    let res;
+    try { res = landmarker.detectForVideo(video, now); } catch (e) { return; }
     if (!res.faceLandmarks?.length) { face = face && { ...face, present: false }; onGaze?.(null); return; }
     // the biggest face is the one she's talking to
     let best = 0, bestSize = 0;
@@ -165,10 +195,18 @@ export function createEyes({ api, onChange, onArrive, onGaze, onStatus }) {
   // ---- a small snapshot for the server's memory, so she can look when asked ----
   async function snapshotLoop() {
     while (running) {
-      const w = 512, h = Math.round((video.videoHeight / video.videoWidth) * w) || 384;
-      canvas.width = w; canvas.height = h; canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-      api('/api/seen/snapshot', { image: canvas.toDataURL('image/jpeg', 0.7) });
-      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const sig = frameSig();
+        sameCount = sig === lastSig ? sameCount + 1 : 0; lastSig = sig;
+        const stale = Date.now() - lastFrameAt > 5000;
+        if (sameCount >= 2 || stale) await reopen(stale ? 'no new frames' : 'same picture');
+        else {
+          const w = 512, h = Math.round((video.videoHeight / video.videoWidth) * w) || 384;
+          canvas.width = w; canvas.height = h; canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+          api('/api/seen/snapshot', { image: canvas.toDataURL('image/jpeg', 0.7) });
+        }
+      } catch (e) { console.warn('eyes snapshot:', e.message); }
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 

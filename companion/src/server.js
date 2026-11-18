@@ -98,7 +98,9 @@ const LOOK = /\b(look at|can you see|do you see|what do you see|what am i (holdi
 
 // Her vision model describes a snapshot (only when someone asks her to look).
 async function describeSnapshot(question, who) {
-  if (!vision.snapshot || Date.now() - vision.snapshotAt > 10000) return null;
+  const age = Date.now() - vision.snapshotAt;
+  if (!vision.snapshot || age > 7000) { console.log(`[eyes] asked to look, but no fresh picture (${vision.snapshot ? Math.round(age / 1000) + "s old" : "none"})`); return null; }
+  console.log(`[eyes] looking at a ${Math.round(age / 1000)}s-old picture`);
   const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`, "Content-Type": "application/json" },
@@ -130,7 +132,12 @@ async function seesText(name, text) {
   if (others.length) lines.push(`Also here: ${others.join(", ")}.`);
   if (vision.unknown) lines.push("There's someone you don't recognise in view as well.");
   if (text && LOOK.test(text)) {
-    try { const d = await describeSnapshot(text, name); if (d) lines.push(`You just looked closely. You see: ${d}`); }
+    try {
+      const d = await describeSnapshot(text, name);
+      lines.push(d ? `You just looked closely at the live picture, taken a moment ago. You see: ${d}
+Trust this over anything you described earlier; things change.`
+        : "You tried to look closely, but your camera hasn't sent a fresh picture. Say so honestly instead of guessing.");
+    }
     catch (e) { lines.push(`(You tried to look closely, but the picture didn't come through: ${e.message}.)`); }
   }
   return lines.join("\n");
