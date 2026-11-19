@@ -11,7 +11,8 @@ $targets = @{}
 foreach ($p in Get-CimInstance Win32_Process) {
   if ($p.ProcessId -eq $me -or $p.ProcessId -eq $launcher) { continue }
   $cmd = [string]$p.CommandLine
-  if ($cmd -match 'lyra-runtime\\start\.bat' -or $cmd -match 'ears\\ears\.py' -or $cmd -match 'Start Lyra\.bat') {
+  # recorder-profile: her hidden video recorder (a headless browser that only she uses)
+  if ($cmd -match 'lyra-runtime\\start\.bat' -or $cmd -match 'ears\\ears\.py' -or $cmd -match 'Start Lyra\.bat' -or $cmd -match 'recorder-profile') {
     $targets[[int]$p.ProcessId] = $cmd
   }
 }

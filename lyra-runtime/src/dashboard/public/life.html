@@ -98,7 +98,7 @@
 </header>
 <div class="jump">
   <a href="#now">Right now</a><a href="#people">People</a><a href="#subjects">Subjects</a><a href="#wants">Wants</a>
-  <a href="#goals">Goals</a><a href="#self">Who she is</a><a href="#lately">Lately</a><a href="#taste">Taste</a>
+  <a href="#goals">Goals</a><a href="#self">Who she is</a><a href="#lately">Lately</a><a href="#taste">Likes</a>
 </div>
 <main>
   <section id="problemsBox" hidden><div class="panel problems"><h3>Parts that couldn't be read</h3><ul class="list" id="problems"></ul></div></section>
@@ -109,7 +109,7 @@
   <section id="goals"><h2>Goals and direction</h2><div class="grid cols" id="goalsGrid"></div></section>
   <section id="self"><h2>Who she is, as she's worked it out</h2><div class="panel" id="selfBox"></div></section>
   <section id="lately"><h2>Lately</h2><div class="grid cols" id="latelyGrid"></div></section>
-  <section id="taste"><h2>Her taste</h2><div class="panel pre" id="tasteBox"></div></section>
+  <section id="taste"><h2>What she's learned people like</h2><div class="panel pre" id="tasteBox"></div></section>
 </main>
 <script>
 const $ = (s) => document.querySelector(s);
@@ -179,7 +179,7 @@ function render(v) {
     : empty('No subjects yet: they grow from what she talks about, reads and makes.');
 
   // Wants, by layer.
-  const layers = [['desires', 'What she wants to do'], ['needs', 'What she needs'], ['outcomes', 'What acting gives her']];
+  const layers = [['desires', 'What she wants to do'], ['needs', 'What she needs from people'], ['inner', "What's bothering her"]];
   $('#wantsGrid').innerHTML = w ? layers.map(([layer, title]) => {
     const rows = w.wants.filter((x) => x.layer === layer);
     return panel(title, rows.length ? rows.map((x) => bar(x.label, x.level, { stack: true, mark: x.threshold, title: x.want, cls: x.threshold != null && x.level >= x.threshold ? 'warn' : '' })).join('') : empty('None.'));
@@ -199,8 +199,8 @@ function render(v) {
     + '</li>';
   const changes = v.direction?.history ?? [];
   $('#goalsGrid').innerHTML = [
-    panel('Goals she\'s chosen', g?.open?.length ? `<ul class="list">${g.open.map(goalItem).join('')}</ul>` : empty('No open goals: she chooses them herself, and hasn\'t yet.')),
-    panel('What she\'s decided about herself', g?.insights?.length ? `<ul class="list">${g.insights.map((x) => `<li>${esc(x.text)}<div class="small muted">${esc(when(x.at))}</div></li>`).join('')}</ul>` : empty('No insights kept yet.')),
+    panel('Promises she\'s keeping', g?.open?.length ? `<ul class="list">${g.open.map(goalItem).join('')}</ul>` : empty('No promises open right now.')),
+    panel('What she\'s reasoned out (Lyra Core)', g?.insights?.length ? `<ul class="list">${g.insights.map((x) => `<li>${esc(x.text)}<div class="small muted">${esc(when(x.at))}</div></li>`).join('')}</ul>` : empty('Nothing yet: Lyra Core reasons new conclusions while she sleeps.')),
     panel('How her direction has changed', changes.length ? `<ul class="list timeline">${changes.slice().reverse().map((e) => `<li><time>${esc(when(e.at))}</time><span><b>${esc(e.who === 'overall' ? 'overall' : e.name)}</b>: ${esc(e.what)} ${e.after ? `“${esc(e.after)}”` : '(none)'}${e.why ? `<div class="small muted">because ${esc(e.why)}${e.evidence ? ` · from “${esc(e.evidence)}”` : ''}</div>` : ''}</span></li>`).join('')}</ul>` : empty('No changes yet.')),
     ...(g?.finished?.length ? [panel('Goals finished or let go', `<ul class="list">${g.finished.map((x) => `<li>${esc(x.text)} <span class="chip">${x.done ? 'done' : 'dropped'}</span>${x.dropReason ? `<div class="small muted">${esc(x.dropReason)}</div>` : ''}</li>`).join('')}</ul>`)] : []),
   ].join('');
@@ -215,10 +215,11 @@ function render(v) {
   const l = v.lately ?? {};
   $('#latelyGrid').innerHTML = [
     panel('Her journal', l.journal?.length ? `<ul class="list">${l.journal.map((e) => `<li><b>${esc(e.title)}</b>${e.at ? ` <span class="small muted">${esc(when(e.at))}</span>` : ''}<div class="small">${esc(e.body)}</div></li>`).join('')}</ul>` : empty('Nothing written yet.')),
+    panel('Lyra Core', v.core ? `<div class="stats"><div><b>${v.core.exchanges}</b>exchanges learned</div><div><b>${v.core.handled}%</b>she could have said herself</div><div><b>${v.core.closeness}%</b>close to Nemotron</div></div><a href="/core.html">Open Core ↗</a>` : empty('Lyra Core couldn\'t be read.')),
     panel('Songs she\'s written', l.songs?.length ? `<ul class="list">${l.songs.map((s) => `<li>“${esc(s.title)}”${s.at ? ` <span class="small muted">${esc(when(s.at))}</span>` : ''}</li>`).join('')}</ul>` : empty('No songs yet.')),
   ].join('');
 
-  $('#tasteBox').textContent = v.taste || 'Her taste couldn\'t be read.';
+  $('#tasteBox').textContent = v.taste || 'Nothing yet. Lyra Core picks this up from things like "I love sci-fi", and reasons more while she sleeps.';
 }
 
 // Searching what she knows about someone.

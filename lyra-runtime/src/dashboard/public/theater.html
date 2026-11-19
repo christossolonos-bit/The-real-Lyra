@@ -77,13 +77,18 @@
   <div id="heard"></div>
 </div>
 <div id="seats"></div>
-<div id="seat"><iframe src="/avatar.html?pip=1&silent=1&character=main" allow="autoplay" title="Her seat"></iframe></div>
+<div id="seat"><iframe id="seat-frame" allow="autoplay" title="Her seat: Lyra's hologram"></iframe></div>
 
 <script>
 // Her theater (src/theater.js). This page plays the video with YouTube's own player, does what she tells it (the
 // event stream), and tells her where the player is (the reports). Her hearing and her reactions follow those reports.
 const $ = (id) => document.getElementById(id);
 let her = 'She';
+// Her seat: her own hologram (the companion server on port 8770), framed from the waist up.
+const seat = $('seat-frame');
+seat.src = `http://${location.hostname}:8770/creator/?embed=1&view=upper`;
+const body = (fn, ...args) => { try { seat.contentWindow.postMessage({ lyraBody: fn, args }, '*'); } catch {} };
+seat.addEventListener('load', () => setTimeout(() => body('mood', 'curious', 0.4), 1500));
 fetch('/api/avatar/status').then((r) => r.json()).then((s) => { if (s && s.name) her = s.name; }).catch(() => {});
 
 let player = null, ready = false, show = null, queued = null, volume = 100, ducked = false, lastError = null, startedAt = 0;
@@ -168,13 +173,14 @@ function put(next) {
 function command(e) {
   if (e.cmd === 'show') return put(e.show);
   if (e.cmd === 'caption') return caption(e.at, e.text);
+  if (e.cmd === 'duck') body('speaking', !!e.on); // even with no show on
   if (e.cmd === 'stop') return put(null);
   if (!ready || !show) return;
   if (e.cmd === 'pause') player.pauseVideo();
   else if (e.cmd === 'play') player.playVideo();
   else if (e.cmd === 'seek') { player.seekTo(e.to, true); setTimeout(report, 400); }
   else if (e.cmd === 'volume') { volume = e.level; player.setVolume(ducked ? Math.round(volume * 0.3) : volume); }
-  else if (e.cmd === 'duck') { ducked = e.on; player.setVolume(ducked ? Math.round(volume * 0.3) : volume); } // she's speaking: the show dips under her
+  else if (e.cmd === 'duck') { ducked = e.on; player.setVolume(ducked ? Math.round(volume * 0.3) : volume); } // she's speaking: the show dips under her, and her hologram talks
 }
 
 // YouTube's player, in the screen.

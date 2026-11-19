@@ -1,6 +1,35 @@
 import { config } from './config.js';
 import { synthesize } from './voice/fishAudio.js';
 import { activity } from './events.js';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// The page records WebM; Discord gets an MP4 (H.264 + AAC, plays everywhere). If ffmpeg fails, the WebM goes instead.
+export const isMp4 = (buf) => buf?.length > 12 && buf.toString('latin1', 4, 8) === 'ftyp';
+function toMp4(webm) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'lyra-clip-'));
+  const src = path.join(dir, 'in.webm'), dst = path.join(dir, 'out.mp4');
+  const cleanup = () => { try { rmSync(dir, { recursive: true, force: true }); } catch {} };
+  writeFileSync(src, webm);
+  return new Promise((resolve) => {
+    const ff = spawn(process.env.FFMPEG_PATH || 'ffmpeg', ['-v', 'error', '-nostdin', '-y', '-i', src, '-vf', 'scale=720:-2,fps=30',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', dst], { windowsHide: true });
+    const err = [];
+    const timer = setTimeout(() => ff.kill(), 60_000);
+    ff.stderr.on('data', (d) => err.push(d));
+    ff.on('error', (e) => { clearTimeout(timer); cleanup(); activity('video', { message: `MP4 conversion unavailable (${e.message}); sending WebM` }); resolve(webm); });
+    ff.on('close', (code) => {
+      clearTimeout(timer);
+      let mp4 = null;
+      try { mp4 = readFileSync(dst); } catch {}
+      cleanup();
+      if (code === 0 && isMp4(mp4)) resolve(mp4);
+      else { activity('video', { message: `MP4 conversion failed (${Buffer.concat(err).toString().trim().slice(-160)}); sending WebM` }); resolve(webm); }
+    });
+  });
+}
 
 // Video replies (Amy's spec, Downloads/amy-avatar-video-spec): a reply in a Discord text channel
 // can also arrive as a clip of her avatar's face saying it. The avatar page, opened in recorder
@@ -57,7 +86,8 @@ export async function requestClip(text) {
       jobs.set(id, { resolve, page, timer: setTimeout(giveUp('the recorder did not start in time'), ACK_MS) });
     });
     page.write(`data: ${JSON.stringify({ type: 'job', id, lines: lines.map((t, i) => ({ text: t, audio: audio[i].toString('base64') })) })}\n\n`);
-    return await done;
+    const clip = await done;
+    return clip ? await toMp4(clip) : null;
   } catch (err) {
     activity('error', { where: 'avatar video', message: err.message });
     return null;

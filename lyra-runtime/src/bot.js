@@ -3,7 +3,7 @@ import { config, updateSettings } from './config.js';
 import { loadCommands } from './loadCommands.js';
 import { respond, SEARCH_ANNOUNCEMENT } from './companion.js';
 import { sessions } from './voice/session.js';
-import { requestClip } from './avatarVideo.js';
+import { requestClip, isMp4 } from './avatarVideo.js';
 import { activity } from './events.js';
 import { sleep } from './sleep.js';
 
@@ -138,7 +138,7 @@ function createClient() {
       // the clip is added to the same message when (and if) it arrives.
       const clip = reply ? requestClip(reply) : Promise.resolve(null);
       const first = await message.reply({ content: chunks[0], files: last === 0 ? files : [], allowedMentions: { repliedUser: false, parse: [] } });
-      clip.then((video) => video && first.edit({ files: [{ attachment: video, name: 'reply.webm' }] })).catch((err) => activity('error', { where: 'video reply', message: err.message }));
+      clip.then((video) => video && first.edit({ files: [{ attachment: video, name: isMp4(video) ? 'lyra.mp4' : 'lyra.webm' }] })).catch((err) => activity('error', { where: 'video reply', message: err.message }));
       for (const [i, chunk] of chunks.slice(1).entries()) {
         await message.channel.send({ content: chunk, files: i + 1 === last ? files : [], allowedMentions: { parse: [] } });
       }

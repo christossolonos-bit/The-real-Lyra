@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Recorder</title>
+<style>
+  :root { --bg:#05090c; --text:#cfeff7; --muted:#7fa3ad; --cyan:#3fe0ff; --rec:#ff4d5e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; display:flex; flex-direction:column; align-items:center; gap:10px; padding:12px; min-height:100vh; }
+  #stage { width:480px; height:480px; max-width:100%; border:1px solid #16303a; border-radius:12px; overflow:hidden; background:#000; }
+  #stage iframe { width:100%; height:100%; border:0; display:block; }
+  #bar { padding:8px 12px; border-radius:8px; background:#0c1a20; max-width:480px; width:100%; text-align:center; cursor:pointer; }
+  #bar.rec { background:#3a0d14; color:#ffd3d8; }
+  #bar.rec::before { content:'● '; color:var(--rec); }
+  small { color:var(--muted); max-width:480px; text-align:center; }
+</style>
+</head>
+<body>
+<div id="stage"><iframe id="holo" src="/creator/?embed=1&view=bust&follow=1" title="Lyra's hologram"></iframe></div>
+<div id="bar">Starting the recorder…</div>
+<small>Her Discord text replies come back with a short video of her saying them. Keep this window open; it can sit behind other windows.</small>
+<script>
+// Video replies (src/avatarVideo.js): the server sends each reply's lines with her voice; this page plays them
+// silently into a recording while her hologram talks, and sends the clip back (the server makes it an MP4).
+const $ = (id) => document.getElementById(id);
+const frame = $('holo');
+let ctx = null, dest = null, analyser = null, busy = false;
+const jobs = [];
+
+function bar(text, rec = false) { $('bar').textContent = text; $('bar').classList.toggle('rec', rec); }
+const lyra = () => frame.contentWindow?.__lyra;
+const body = () => lyra()?.body;
+const canvas = () => frame.contentDocument?.querySelector('canvas');
+
+function audio() {
+  if (!ctx) {
+    ctx = new AudioContext();
+    dest = ctx.createMediaStreamDestination(); // into the recording only, not the speakers
+    analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+    analyser.connect(dest);
+  }
+  return ctx;
+}
+const ready = () => ctx?.state === 'running' && body() && canvas();
+function idleText() { bar(ready() ? 'Recorder ready. Waiting for her next Discord reply.' : ctx?.state !== 'running' ? 'Click here once to allow audio.' : 'Her hologram is loading…'); }
+
+// the glow breathes with her voice while she talks
+let raf = 0;
+function levels() {
+  const buf = new Uint8Array(analyser.fftSize);
+  const tick = () => {
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0; for (const v of buf) sum += ((v - 128) / 128) ** 2;
+    try { body()?.level(Math.min(1, Math.sqrt(sum / buf.length) * 4)); } catch {}
+    raf = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
+const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const post = (url, data) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data ?? {}) });
+
+async function record(job) {
+  if (audio().state !== 'running') await ctx.resume().catch(() => {});
+  if (ctx.state !== 'running') return post(`/api/avatar/recorder/${job.id}/failed`, { reason: 'audio is blocked: click the recorder page once' });
+  for (let i = 0; i < 100 && !(body() && canvas()); i++) await wait(200);
+  if (!body() || !canvas()) return post(`/api/avatar/recorder/${job.id}/failed`, { reason: "her hologram hadn't loaded in the recorder" });
+  const buffers = [];
+  for (const line of job.lines) buffers.push(await ctx.decodeAudioData(b64(line.audio)));
+  const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+  const stream = new MediaStream([...canvas().captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
+  const chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 3_000_000, audioBitsPerSecond: 128_000 });
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const stopped = new Promise((ok) => (rec.onstop = ok));
+  rec.start();
+  post(`/api/avatar/recorder/${job.id}/ack`);
+  bar(`Recording reply #${job.id}`, true);
+
+  const b = body();
+  const first = job.lines[0]?.text ?? '';
+  if (/^(hi|hey|hello|hiya|morning|good (morning|evening|afternoon))\b/i.test(first)) b.gesture('wave');
+  await wait(350); // a beat before she starts, so the clip doesn't open mid-word
+  b.speaking(true); levels();
+  for (const [i, buf] of buffers.entries()) {
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(analyser);
+    const done = new Promise((ok) => (src.onended = ok));
+    src.start();
+    if (/\?\s*$/.test(job.lines[i].text)) setTimeout(() => { try { b.gesture('think'); } catch {} }, buf.duration * 500);
+    await done;
+    await wait(120); // a small breath between sentences
+  }
+  b.speaking(false); cancelAnimationFrame(raf); b.level(0);
+  await wait(600); // she settles before the clip ends
+  rec.stop(); await stopped;
+  stream.getTracks().forEach((t) => t.kind === 'video' && t.stop());
+  const blob = new Blob(chunks, { type: 'video/webm' });
+  await fetch(`/api/avatar/recorder/${job.id}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: blob });
+  bar(`Sent reply #${job.id} (${(blob.size / 1048576).toFixed(1)} MB). Waiting for the next one.`);
+}
+
+async function next() {
+  if (busy || !jobs.length) return;
+  busy = true;
+  const job = jobs.shift();
+  try { await record(job); }
+  catch (err) { post(`/api/avatar/recorder/${job.id}/failed`, { reason: err.message }); bar(`Reply #${job.id} failed: ${err.message}`); }
+  busy = false;
+  next();
+}
+
+// Browsers need a click before sound can start (unless the recorder was opened by Start Lyra, which allows it).
+$('bar').addEventListener('click', () => audio().resume().then(idleText));
+addEventListener('pointerdown', () => audio().resume().then(idleText));
+audio().resume().catch(() => {});
+setInterval(() => { if (!busy) idleText(); }, 2000);
+
+const events = new EventSource('/api/avatar/recorder');
+events.onmessage = (e) => { const msg = JSON.parse(e.data); if (msg.type === 'job') { jobs.push(msg); next(); } };
+events.onerror = () => bar('Lost the connection to her; reconnecting…');
+</script>
+</body>
+</html>

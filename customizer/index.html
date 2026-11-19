@@ -426,7 +426,7 @@ function setView(v) {
   if (!bbox) return;
   const h = bbox.max.y - bbox.min.y, cx = (bbox.max.x + bbox.min.x) / 2, cz = (bbox.max.z + bbox.min.z) / 2;
   const front = new THREE.Vector3(0, 0, 1);
-  const presets = { face: [0.9, 0.26 * h], upper: [0.76, 0.5 * h], full: [0.5, 1.05 * h] };
+  const presets = { face: [0.9, 0.26 * h], bust: [0.86, 0.34 * h], upper: [0.76, 0.5 * h], full: [0.5, 1.05 * h] };
   const [ty, span] = presets[v]; const y = bbox.min.y + h * ty;
   const dist = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   controls.target.set(cx, y, cz);
@@ -477,6 +477,21 @@ composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.6, 0.55, 0.42);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+// ?follow=1 (her video replies): the camera glides after her head, so swaying while she talks never
+// takes her out of a close shot. It keeps the same distance and height offset, and only moves sideways and up/down.
+const FOLLOW = new URLSearchParams(location.search).get('follow') === '1';
+const followAt = new THREE.Vector3();
+function followHead(dt) {
+  if (!FOLLOW || !model) return;
+  const head = (body._head ??= model.getObjectByName('bone_Head'));
+  if (!head) return;
+  head.getWorldPosition(followAt);
+  followAt.y -= 0.02 * (bbox ? bbox.max.y - bbox.min.y : 1.8); // the head bone pivots at the neck: aim just below it, for head and shoulders
+  const k = 1 - Math.exp(-dt * 3);
+  const move = new THREE.Vector3().subVectors(followAt, controls.target);
+  move.z = 0; move.multiplyScalar(k);
+  controls.target.add(move); camera.position.add(move);
+}
 function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 const clock = new THREE.Clock();
@@ -485,6 +500,7 @@ renderer.setAnimationLoop(() => {
   mixer?.update(dt);
   body?.applyGaze?.(dt); // eye contact, on top of whatever she's playing
   if (spin && model) model.rotation.y += dt * 0.5;
+  followHead(dt);
   controls.update();
   if (holo) composer.render(); else renderer.render(scene, camera);
 });
@@ -630,6 +646,17 @@ if (EMBED.has('embed')) {
   }, 150);
 }
 window.__lyra = { groups, look, U, setView, body };
+// Other pages on this PC (her dashboard's theater seat) can't reach window.__lyra across ports, so they
+// send messages instead: { lyraBody: 'speaking' | 'mood' | 'gesture' | 'listen' | 'think', args: [...] }.
+const BRIDGE = new Set(['speaking', 'mood', 'gesture', 'listen', 'think', 'level']);
+window.addEventListener('message', (e) => {
+  let host = '';
+  try { host = new URL(e.origin).hostname; } catch { return; }
+  if (!['localhost', '127.0.0.1'].includes(host)) return; // only pages on this PC
+  const fn = e.data?.lyraBody;
+  if (BRIDGE.has(fn)) try { body[fn](...(Array.isArray(e.data.args) ? e.data.args.slice(0, 2) : [])); } catch {}
+  else if (e.data?.lyraView && ['face', 'bust', 'upper', 'full'].includes(e.data.lyraView)) setView(e.data.lyraView);
+});
 </script>
 </body>
 </html>

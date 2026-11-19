@@ -1,11 +1,11 @@
 import http from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AttachmentBuilder, ChannelType } from 'discord.js';
-import { config, getSettings, updateSettings, DATA_DIR } from '../config.js';
+import { config, getSettings, updateSettings, DATA_DIR, ROOT } from '../config.js';
 import { bus, recentActivity, activity } from '../events.js';
 import { listModels, openRouterModels } from '../llm.js';
 import { respond } from '../companion.js';
@@ -258,6 +258,20 @@ function buildRoutes(bot) {
     })),
     r('GET', '/api/context/turns', () => []),
     r('GET', '/api/context/turn', () => null),
+    // Her hologram is her avatar (companion server, port 8770). /api/hologram opens her talk page as Chris
+    // (the owner key comes from companion/.env; the dashboard only listens on this PC);
+    // /api/hologram?view=face|upper|full opens just her body, framed that way.
+    r('GET', '/api/hologram', ({ res, url }) => {
+      let env = '';
+      try { env = readFileSync(path.join(ROOT, '..', 'companion', '.env'), 'utf8'); } catch {}
+      const get = (k) => env.match(new RegExp(`^${k}=(.*)$`, 'm'))?.[1]?.trim() ?? '';
+      const host = `http://${url.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost'}:${get('PORT') || 8770}`;
+      const view = url.searchParams.get('view');
+      const to = view ? `${host}/creator/?embed=1&view=${encodeURIComponent(view)}` : `${host}/${get('OWNER_KEY') ? `?owner=${encodeURIComponent(get('OWNER_KEY'))}` : ''}`;
+      res.writeHead(302, { Location: to, 'Cache-Control': 'no-store' });
+      res.end();
+      return undefined;
+    }),
     // Lyra Core: her own learning system's scoreboard (/core.html)
     r('GET', '/api/core', async () => (await import('../core/index.js')).core.stats()),
     r('POST', '/api/core/consolidate', async () => (await import('../core/index.js')).core.consolidate()),
@@ -502,10 +516,10 @@ function buildRoutes(bot) {
     r('POST', '/api/avatar/motion', ({ body }) => avatarLive.setMotionState({ ...(body || {}), source: body?.source || 'manual' })),
     // Records a test line through the recorder page and returns the clip, to check it works.
     r('POST', '/api/avatar/recorder/test', async ({ res, body }) => {
-      if (!video.recorderConnected()) throw Object.assign(new Error('No recorder page is open (/avatar.html?recorder=1)'), { status: 409 });
+      if (!video.recorderConnected()) throw Object.assign(new Error('Her video recorder is not running yet (it starts with her; give it a few seconds)'), { status: 409 });
       const clip = await video.requestClip(String(body.text || "Hey, it's me. This is a test of my video replies."));
       if (!clip) throw Object.assign(new Error('No clip came back; see the activity feed for why'), { status: 502 });
-      res.writeHead(200, { 'Content-Type': 'video/webm', 'Content-Length': clip.length });
+      res.writeHead(200, { 'Content-Type': video.isMp4(clip) ? 'video/mp4' : 'video/webm', 'Content-Length': clip.length });
       res.end(clip);
       return undefined;
     }),
@@ -806,11 +820,18 @@ function authorized(req) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json', '.glb': 'model/gltf-binary', '.png': 'image/png', '.jpg': 'image/jpeg' };
+
+// Her hologram (the character creator, ../customizer) is also served here under /creator/, so the
+// video recorder page can capture it (a page can only record a canvas from its own address).
+const CREATOR = path.join(ROOT, '..', 'customizer');
 
 async function serveStatic(res, pathname) {
-  const file = path.normalize(path.join(PUBLIC, pathname === '/' ? 'index.html' : pathname));
-  if (!file.startsWith(PUBLIC)) return send(res, 403, { error: 'Forbidden' });
+  const creator = pathname.startsWith('/creator/');
+  const base = creator ? CREATOR : PUBLIC;
+  const rel = creator ? pathname.slice('/creator/'.length) || 'index.html' : pathname === '/' ? 'index.html' : pathname;
+  const file = path.normalize(path.join(base, rel));
+  if (!file.startsWith(base)) return send(res, 403, { error: 'Forbidden' });
   try {
     const data = await readFile(file);
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] ?? 'application/octet-stream' });

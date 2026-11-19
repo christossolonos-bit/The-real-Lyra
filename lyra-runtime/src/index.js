@@ -26,6 +26,10 @@ process.on('unhandledRejection', (err) => activity('error', { where: 'unhandled'
 // The dashboard always runs; the Discord bot can be switched on and off from it.
 startDashboard(bot);
 
+// Her video recorder (Discord text replies get a short MP4 of her hologram saying them). Hidden, starts by itself.
+const { startRecorder } = await import('./recorder-launcher.js');
+startRecorder();
+
 // Her pressure buckets (boredom, curiosity, loneliness...): curiosity and boredom send her off to
 // research and write in her journal; the rest speak up in voice calls (see pressure.js).
 setResearcher(research);
