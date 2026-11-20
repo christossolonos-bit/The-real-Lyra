@@ -48,7 +48,7 @@
 <div id="app">
   <div id="stage">
     <div id="loading">Loading model…</div>
-    <div id="title"><h1>Lyra</h1><p>Character creator · private test · Body <select id="bodyPick"><option value="lyra">Lyra (teal dress)</option><option value="rocketbox_lyra">Rocketbox</option><option value="freya_lyra">Freya</option><option value="rh012_lyra">RH012</option><option value="megane_lyra">Mégane, teal look</option><option value="megane">Mégane (original clothes)</option><option value="nova">Nova (realistic)</option><option value="wow">Customisable (WoW)</option></select></p></div>
+    <div id="title"><h1>Lyra</h1><p>Character creator · private test · Body <select id="bodyPick"><option value="lyra">Lyra (series outfit)</option><option value="teal_dress_lyra">Lyra (teal dress)</option><option value="rocketbox_lyra">Rocketbox</option><option value="freya_lyra">Freya</option><option value="rh012_lyra">RH012</option><option value="megane_lyra">Mégane, teal look</option><option value="megane">Mégane (original clothes)</option><option value="nova">Nova (realistic)</option><option value="wow">Customisable (WoW)</option></select></p></div>
     <div id="toast"></div>
     <div id="viewbar">
       <button data-view="face">Face</button>
@@ -131,9 +131,9 @@ import { loadRetargeted } from './retarget.js';
 // Her body: 'nova' (the realistic Meshy model, rigged by tools/nova_*.py) or 'wow' (the old customisable one).
 // Pick with ?body=wow|nova, or the Body switch on this page (remembered).
 const BODY = (() => { const q = new URLSearchParams(location.search).get('body'); let saved = null; try { saved = localStorage.getItem('lyra-body'); } catch {}
-  const ok = ['lyra', 'rocketbox_lyra', 'freya_lyra', 'rh012_lyra', 'megane_lyra', 'megane', 'nova', 'wow']; return ok.includes(q) ? q : ok.includes(saved) ? saved : 'lyra'; })();
+  const ok = ['lyra', 'teal_dress_lyra', 'rocketbox_lyra', 'freya_lyra', 'rh012_lyra', 'megane_lyra', 'megane', 'nova', 'wow']; return ok.includes(q) ? q : ok.includes(saved) ? saved : 'lyra'; })();
 const MODEL_V = '?v=' + Date.now(); // always the newest build of her body, never a stale cached copy
-const MODEL_BASE = { wow: 'models/humanfemale_hd.glb', nova: 'models/nova.glb', megane: 'models/megane.glb', megane_lyra: 'models/megane_lyra.glb', rh012_lyra: 'models/rh012_lyra.glb', freya_lyra: 'models/freya_lyra.glb', rocketbox_lyra: 'models/rocketbox_lyra.glb', lyra: 'models/lyra.glb' }[BODY];
+const MODEL_BASE = { wow: 'models/humanfemale_hd.glb', nova: 'models/nova.glb', megane: 'models/megane.glb', megane_lyra: 'models/megane_lyra.glb', rh012_lyra: 'models/rh012_lyra.glb', freya_lyra: 'models/freya_lyra.glb', teal_dress_lyra: 'models/teal_dress_lyra.glb', rocketbox_lyra: 'models/rocketbox_lyra.glb', lyra: 'models/lyra.glb' }[BODY];
 const MODEL = MODEL_BASE + MODEL_V;
 const CC = !['wow', 'nova'].includes(BODY); // realistic characters (Freya, Reallusion): hair cards, eye layers, face rig // Reallusion characters: special hair/eye materials, face shapes
 const PREFIX = 'humanfemale_hd_';

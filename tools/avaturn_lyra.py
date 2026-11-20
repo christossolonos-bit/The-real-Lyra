@@ -47,6 +47,140 @@ def pix(img):
     return np.array(img.pixels[:], dtype=np.float32).reshape(img.size[1], img.size[0], 4)
 
 
+# ---------- Lyra's series outfit (Chris, 2026-11-20): teal long-sleeve top, dark teal trousers, dark shoes ----------
+# The avatar carries a hidden default outfit (jacket over a top, trousers) made for her body. It replaces the dress
+# and is recoloured: the jacket and the top under it teal (the top a touch lighter), the trousers dark teal.
+# LYRA_OUTFIT=plain (default) her plain series top; =jacket the recoloured jacket; =original the avatar's own clothes.
+import bmesh
+TEAL, PANTS, SHOES = np.array([0.059, 0.357, 0.420]), np.array([0.078, 0.208, 0.239]), np.array([0.09, 0.10, 0.11])
+
+
+def raster(mask, tris_uv):
+    h, w = mask.shape
+    for t in tris_uv:
+        p = np.array(t) * [w, h]
+        x0, y0 = np.floor(p.min(0)).astype(int)
+        x1, y1 = np.ceil(p.max(0)).astype(int)
+        x0, y0, x1, y1 = max(x0 - 1, 0), max(y0 - 1, 0), min(x1 + 1, w - 1), min(y1 + 1, h - 1)
+        if x1 < x0 or y1 < y0:
+            continue
+        xs, ys = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        (ax, ay), (bx, by), (cx, cy) = p
+        d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(d) < 1e-9:
+            continue
+        l1 = ((by - cy) * (xs - cx) + (cx - bx) * (ys - cy)) / d
+        l2 = ((cy - ay) * (xs - cx) + (ax - cx) * (ys - cy)) / d
+        mask[y0:y1 + 1, x0:x1 + 1] |= (l1 >= -0.03) & (l2 >= -0.03) & (1 - l1 - l2 >= -0.03)
+
+
+def recolour(obj, groups):
+    """groups: [(faces, colour, lo, hi)]: paint each group's part of the texture in that colour, keeping its shading."""
+    mat = obj.material_slots[0].material
+    bsdf = mat.node_tree.nodes.get('Principled BSDF')
+    node = next(l.from_node for l in bsdf.inputs['Base Color'].links if l.from_node.type == 'TEX_IMAGE')
+    a = pix(node.image)
+    lum = a[..., 0] * 0.3 + a[..., 1] * 0.59 + a[..., 2] * 0.11
+    uv = obj.data.uv_layers.active.data
+    out = a.copy()
+    for faces, colour, lo, hi in groups:
+        m = np.zeros(lum.shape, bool)
+        raster(m, [(L[0], L[k], L[k + 1]) for f in faces for L in [[uv[i].uv[:] for i in f.loop_indices]] for k in range(1, len(L) - 1)])
+        if not m.any():
+            continue
+        k = np.clip(lo + hi * (lum / max(lum[m].mean(), 1e-3)), 0.3, 1.6)[..., None]
+        out[..., :3] = np.where(m[..., None], np.clip(colour[None, None, :] * k, 0, 1), out[..., :3])
+    h, w = out.shape[:2]
+    img = bpy.data.images.new(node.image.name + '_lyra', w, h, alpha=True)
+    img.pixels.foreach_set(out.ravel())
+    img.file_format = 'JPEG'
+    img.filepath_raw = os.path.join(WORK, f'{obj.name}_lyra.jpg')
+    img.save()
+    node.image = img
+
+
+OUTFIT = os.environ.get('LYRA_OUTFIT', 'plain')  # plain (her series look) | jacket | original
+# the outfit's pieces (connected parts of avaturn_look_0, in mesh order); the plain top drops the tailoring
+COLLARS = {7, 8, 9, 11, 12, 15, 16, 31, 39, 51}
+LAPELS = {32, 33, 40, 41, 49, 50}
+BELT = {0, 1, 2, 3, 4, 5, 6, 20, 21, 22, 23}
+TAILS = {24, 25, 28, 42, 43, 44, 46, 47}
+TROUSERS = {18, 19}
+
+
+def islands(obj):
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    seen, out = set(), []
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        isl, stack = [], [f]
+        seen.add(f.index)
+        while stack:
+            g = stack.pop()
+            isl.append(g.index)
+            for e in g.edges:
+                for n in e.link_faces:
+                    if n.index not in seen:
+                        seen.add(n.index)
+                        stack.append(n)
+        out.append(isl)
+    bm.free()
+    return out
+
+
+if OUTFIT != 'original':
+    look = bpy.data.objects.get('avaturn_look_0')
+    if look:
+        if look.name not in bpy.context.view_layer.objects:
+            bpy.context.scene.collection.objects.link(look)
+        look.hide_viewport = False
+        look.hide_set(False)
+        look.hide_render = False
+        for o in [o for o in bpy.data.objects if o.name.startswith('Wardrobe_')]:
+            bpy.data.objects.remove(o)  # the dress goes
+        isl = islands(look)
+        assert len(isl) == 52 and len(look.data.polygons) == 8909, 'not the avatar this was made for'
+        hips = (rig.matrix_world @ rig.data.bones['bone_Root'].head_local).z
+        if OUTFIT == 'plain':
+            # Lyra's plain top (Chris, 2026-11-20: "strip these clothes off her and put the Lyra hologram clothes on her"):
+            # no collar, lapels, belt or jacket tails; the rest of the jacket and shirt becomes one fitted long-sleeve top,
+            # ending just below the waist, over the trousers (which start at 1.18 m)
+            drop = {i for k in COLLARS | LAPELS | BELT | TAILS for i in isl[k]}
+            waist = hips + 0.11
+            for k, faces in enumerate(isl):
+                if k not in TROUSERS:
+                    drop |= {i for i in faces if (look.matrix_world @ look.data.polygons[i].center).z < waist}
+            bm = bmesh.new()
+            bm.from_mesh(look.data)
+            bm.faces.ensure_lookup_table()
+            bmesh.ops.delete(bm, geom=[bm.faces[i] for i in sorted(drop)], context='FACES')
+            bm.to_mesh(look.data)
+            bm.free()
+            look.data.update()
+            # after the delete, sort again by piece: whatever is left of the trousers vs the top
+            isl2 = islands(look)
+            low = [k for k, f in enumerate(isl2) if min((look.matrix_world @ look.data.polygons[i].center).z for i in f) < 0.5]
+            P = look.data.polygons
+            tro = [P[i] for k in low for i in isl2[k]]
+            top = [P[i] for k, f in enumerate(isl2) if k not in low for i in f]
+            # flat colours, the cloth's own creases kept faintly (buttons and seams fade out); each piece is evened out
+            # on its own (the shirt fabric is much lighter than the jacket's), so the whole top is one teal
+            recolour(look, [(tro, PANTS, 0.7, 0.35)] + [([P[i] for i in f], TEAL, 0.85, 0.18) for k, f in enumerate(isl2) if k not in low])
+            print(f'Lyra plain outfit: top {len(top)} faces, trousers {len(tro)} faces, dropped {len(drop)}')
+        else:
+            top = [i for k, f in enumerate(isl) if k not in TROUSERS for i in f]
+            tro = [i for k in TROUSERS for i in isl[k]]
+            polys = look.data.polygons
+            recolour(look, [([polys[i] for i in tro], PANTS, 0.6, 0.5), ([polys[i] for i in top], TEAL, 0.55, 0.6)])
+            print(f'Lyra jacket outfit: jacket and top {len(top)} faces, trousers {len(tro)} faces')
+    shoes = bpy.data.objects.get('avaturn_shoes_0')
+    if shoes and shoes.name in bpy.context.view_layer.objects:
+        recolour(shoes, [(list(shoes.data.polygons), SHOES, 0.5, 0.6)])
+
+
 def export(path):
     # only what she actually wears: the avatar also carries hidden default clothes (outside the view layer)
     vl = bpy.context.view_layer
