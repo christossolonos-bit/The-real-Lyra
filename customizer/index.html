@@ -48,7 +48,7 @@
 <div id="app">
   <div id="stage">
     <div id="loading">Loading model…</div>
-    <div id="title"><h1>Lyra</h1><p>Character creator · private test</p></div>
+    <div id="title"><h1>Lyra</h1><p>Character creator · private test · Body <select id="bodyPick"><option value="lyra">Lyra (teal dress)</option><option value="rocketbox_lyra">Rocketbox</option><option value="freya_lyra">Freya</option><option value="rh012_lyra">RH012</option><option value="megane_lyra">Mégane, teal look</option><option value="megane">Mégane (original clothes)</option><option value="nova">Nova (realistic)</option><option value="wow">Customisable (WoW)</option></select></p></div>
     <div id="toast"></div>
     <div id="viewbar">
       <button data-view="face">Face</button>
@@ -128,7 +128,14 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { loadRetargeted } from './retarget.js';
 
-const MODEL = 'models/humanfemale_hd.glb';
+// Her body: 'nova' (the realistic Meshy model, rigged by tools/nova_*.py) or 'wow' (the old customisable one).
+// Pick with ?body=wow|nova, or the Body switch on this page (remembered).
+const BODY = (() => { const q = new URLSearchParams(location.search).get('body'); let saved = null; try { saved = localStorage.getItem('lyra-body'); } catch {}
+  const ok = ['lyra', 'rocketbox_lyra', 'freya_lyra', 'rh012_lyra', 'megane_lyra', 'megane', 'nova', 'wow']; return ok.includes(q) ? q : ok.includes(saved) ? saved : 'lyra'; })();
+const MODEL_V = '?v=' + Date.now(); // always the newest build of her body, never a stale cached copy
+const MODEL_BASE = { wow: 'models/humanfemale_hd.glb', nova: 'models/nova.glb', megane: 'models/megane.glb', megane_lyra: 'models/megane_lyra.glb', rh012_lyra: 'models/rh012_lyra.glb', freya_lyra: 'models/freya_lyra.glb', rocketbox_lyra: 'models/rocketbox_lyra.glb', lyra: 'models/lyra.glb' }[BODY];
+const MODEL = MODEL_BASE + MODEL_V;
+const CC = !['wow', 'nova'].includes(BODY); // realistic characters (Freya, Reallusion): hair cards, eye layers, face rig // Reallusion characters: special hair/eye materials, face shapes
 const PREFIX = 'humanfemale_hd_';
 const STORE = 'lyra-look-v1';
 
@@ -247,6 +254,9 @@ function patch(mat, mode) {
         if (eye && sat > 0.08 && t.g > t.r && t.g >= t.b) c = hueShift(t, uEyeHue);
         diffuseColor.rgb = c; }`;
     if (mode === 'hair') body = `diffuseColor.rgb = hairMap(diffuseColor.rgb);`;
+    if (mode === 'garment') body = `cloth = 1.0;`;
+    if (mode === 'cchair') body = `diffuseColor.a = clamp(diffuseColor.a * 4.0, 0.0, 1.0);`;
+    if (mode === 'ccscalp') body = `diffuseColor.a = clamp(diffuseColor.a * 2.5, 0.0, 1.0);`;
     if (mode === 'eye') body = `{ vec3 t = diffuseColor.rgb; float sat = max(t.r,max(t.g,t.b)) - min(t.r,min(t.g,t.b));
         if (sat > 0.08 && t.g > t.r && t.g >= t.b) diffuseColor.rgb = hueShift(t, uEyeHue); }`;
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\nfloat cloth = 0.0; float hem = 0.0;\n' + body)
@@ -254,7 +264,7 @@ function patch(mat, mode) {
         if (uHolo > 0.5) {
           // solid, lit hologram: her own shading becomes cyan light (no see-through)
           float l = dot(gl_FragColor.rgb, vec3(.3,.59,.11));
-          l = ${mode === 'hair' ? '0.10 + l * 1.6' : 'l'};
+          l = ${mode === 'hair' || mode === 'cchair' ? '0.10 + l * 1.6' : 'l'};
           float fr = pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.5);
           float scan = 0.86 + 0.14 * sin(gl_FragCoord.y * 1.6 - uTime * 6.0);
           float band = 0.92 + 0.08 * smoothstep(0.96, 1.0, sin(gl_FragCoord.y * 0.02 - uTime * 1.5));
@@ -265,7 +275,8 @@ function patch(mat, mode) {
           // clothing reads as clothing: dimmer, with a fine woven light pattern and glowing hems
           if (cloth > 0.0) {
             float weave = 0.82 + 0.18 * sin(vRest.y * 900.0) * sin(vRest.z * 900.0 + vRest.x * 900.0);
-            c = mix(c, c * 0.55 * weave + uCyan * fr * 0.5, cloth);
+            // clothes glow evenly (flat fabric light), so the body's shape doesn't show through them
+            c = mix(c, uCyan * (0.30 + 0.18 * clamp(l, 0.0, 1.0)) * weave + uCyan * fr * 0.45, cloth);
           }
           c += uCyan * hem * 1.2;
           gl_FragColor = vec4(c * scan * band * flick, 1.0);
@@ -286,14 +297,31 @@ new GLTFLoader().load(MODEL, (g) => {
     const name = (o.name || o.parent?.name || '').replace(PREFIX, '');
     const m = name.match(/^([A-Za-z]+?)(\d+)(?:_\d+)?$/);
     const grp = m ? m[1] : name, idx = m ? +m[2] : 0;
-    ((groups[grp] ??= {})[idx] ??= []).push(o);
+    if (BODY === 'wow') ((groups[grp] ??= {})[idx] ??= []).push(o); // WoW part switching (hair/face/outfit pieces) only
     const mn = o.material.name;
-    const mode = mn === 'skin' ? 'skin' : mn === 'texture-type-6' ? 'hair' : mn === 'texture-type-19' ? 'eye' : 'other';
-    o.material = o.material.clone(); patch(o.material, mode);
+    // Nova's colours are her own textures: no WoW hair/skin/outfit recolouring, just the hologram
+    // Reallusion hair is drawn with soft ~25-50% alpha by its own shader; here it's strengthened so the strands show
+    const ccHair = CC && /Transparency/i.test(mn) && !/Eyelash|Occlusion|Tearline/i.test(mn);
+    const garmentMat = /^Lyra(Top|Trousers)/.test(mn); // Lyra's own clothes (tools/freya_to_lyra.py): fabric in the hologram
+    const mode = garmentMat ? 'garment' : ccHair ? (/Scalp/i.test(mn) ? 'ccscalp' : 'cchair') : BODY !== 'wow' ? 'nova' : mn === 'skin' ? 'skin' : mn === 'texture-type-6' ? 'hair' : mn === 'texture-type-19' ? 'eye' : 'other';
+    o.material = o.material.clone();
+    // Reallusion (Mégane) materials: hair cards and lashes cut out by their alpha, the clear cornea hidden so the
+    // iris shows, and the soft eye-shadow/tear layers kept see-through on top
+    if (CC) {
+      const mt = o.material, n = mt.name;
+      if (/Cornea|Glass/i.test(n)) mt.visible = false;
+      else if (/Occlusion|Tearline|Scalp|BabyHair|^Cap|EyeAO/i.test(n)) { mt.transparent = true; mt.depthWrite = false; mt.alphaTest = 0; } // soft layers blend
+      else if (/Hair|Eyelash|Eyebrow|Transparency|_opacity/i.test(n)) { mt.transparent = false; mt.alphaTest = 0.4; mt.side = THREE.DoubleSide; } // hair cards: cut out
+      else { mt.transparent = false; mt.alphaTest = 0; mt.opacity = 1; mt.depthWrite = true; } // skin, clothes, shoes: solid
+      if (/^Lyra(Top|Trousers)/.test(n)) mt.side = THREE.DoubleSide; // her made garments: no see-through gaps
+    }
+    patch(o.material, mode);
     o.userData.mode = mode;
   });
   // normalise: face the camera (+Z), stand on the floor
-  model.rotation.y = -Math.PI / 2;
+  // the WoW and Rocketbox models face sideways; the others already face the camera (+Z)
+  if (BODY === 'wow') model.rotation.y = -Math.PI / 2;
+  if (BODY === 'rocketbox_lyra') model.rotation.y = Math.PI / 2;
   model.updateMatrixWorld(true);
   bbox = new THREE.Box3().setFromObject(model);
   model.position.y -= bbox.min.y;
@@ -364,6 +392,7 @@ function apply() {
 function playAnim() {
   if (!mixer) return;
   const clip = clips.find(c => c.name === look.anim) || clips[0];
+  if (!clip) return; // Nova has no clips of her own until the Rocketbox library is fitted to her
   document.getElementById('anim').value = clip.name;
   if (action?.getClip() === clip || new URLSearchParams(location.search).has('embed')) return;
   const next = mixer.clipAction(clip); next.reset().play();
@@ -492,12 +521,152 @@ function followHead(dt) {
   move.z = 0; move.multiplyScalar(k);
   controls.target.add(move); camera.position.add(move);
 }
+// ---------- lip sync: her mouth follows her real voice ----------
+// The model has no mouth shapes, but it has a jaw bone (the lower lip and chin hang off it) and lip bones.
+// Pages send her voice level (and how bright the sound is) through body.level(v, bright):
+//   loud -> the jaw opens;  bright ("ee", "s") -> the corners spread;  dark ("oo", "o") -> the lips round.
+// Positions below are in her bind pose: x forward, y up, z sideways (+z is her left).
+const MOUTH = {
+  jawOpen: -0.15, // radians around the jaw's z axis at full open
+  corners: { bone_65: 1, bone_54: -1 },              // mouth corners (+1 her left, -1 her right)
+  upper: ['bone_63', 'bone_83', 'bone_73', 'bone_78'], // upper lip
+};
+const mouth = { open: 0, wide: 0, round: 0, level: 0, bright: 0.5, at: 0, bones: null };
+const tmpV = new THREE.Vector3(), tmpM = new THREE.Matrix3(), tmpQ = new THREE.Quaternion(), zAxis = new THREE.Vector3(0, 0, 1);
+// Freya's face rig (Rigify DEF bones, all children of the head): opening the mouth turns a whole group of bones
+// around the jaw hinge; lip corners shape "ee"/"oo"; upper eyelids come down to blink.
+const RIGIFY_JAW = { 'DEF-jaw': 1, 'DEF-chin': 1, 'DEF-chin.001': 1, 'DEF-chin.L': 0.9, 'DEF-chin.R': 0.9, 'DEF-jaw.L.001': 0.85, 'DEF-jaw.R.001': 0.85,
+  'DEF-jaw.L': 0.35, 'DEF-jaw.R': 0.35, 'DEF-lip.B.L': 1, 'DEF-lip.B.R': 1, 'DEF-lip.B.L.001': 0.9, 'DEF-lip.B.R.001': 0.9,
+  'DEF-teeth.B': 1, 'DEF-tongue': 1, 'DEF-tongue.001': 1, 'DEF-tongue.002': 1, bone_Jaw: 1 };
+const RIGIFY_LIPS = { 'DEF-lip.T.L.001': 1, 'DEF-lip.B.L.001': 1, 'DEF-lip.T.R.001': -1, 'DEF-lip.B.R.001': -1 };
+const RIGIFY_CENTRE = ['DEF-lip.T.L', 'DEF-lip.T.R', 'DEF-lip.B.L', 'DEF-lip.B.R'];
+const RIGIFY_LIDS = { 'DEF-lid.T.L': 0.25, 'DEF-lid.T.L.001': 1, 'DEF-lid.T.L.002': 0.95, 'DEF-lid.T.L.003': 0.4,
+  'DEF-lid.T.R': 0.25, 'DEF-lid.T.R.001': 1, 'DEF-lid.T.R.002': 0.95, 'DEF-lid.T.R.003': 0.4 };
+const byBone = (n) => model.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(n));
+function rigifyFace() {
+  const head = model.getObjectByName('bone_Head'), hinge = model.getObjectByName('bone_Jaw');
+  if (!head || !hinge || !byBone('DEF-chin')) return null;
+  model.updateMatrixWorld(true);
+  const rest = (b) => b && { b, p: b.position.clone(), q: b.quaternion.clone() };
+  const list = (o) => Object.entries(o).map(([n, w]) => ({ ...rest(byBone(n)), w })).filter((x) => x.b);
+  const headInv = head.getWorldQuaternion(new THREE.Quaternion()).invert();
+  return {
+    rigify: true, head,
+    pivot: head.worldToLocal(hinge.getWorldPosition(new THREE.Vector3())),     // the jaw hinge, in head space
+    axis: new THREE.Vector3(1, 0, 0).applyQuaternion(headInv).normalize(),     // world x: chin goes down and back
+    down: new THREE.Vector3(0, -1, 0).applyQuaternion(headInv).normalize(),
+    front: new THREE.Vector3(0, 0, 1).applyQuaternion(headInv).normalize(),
+    side: new THREE.Vector3(1, 0, 0).applyQuaternion(headInv).normalize(),
+    jaw: list(RIGIFY_JAW), lips: list(RIGIFY_LIPS), centre: list(Object.fromEntries(RIGIFY_CENTRE.map((n) => [n, 1]))), lids: list(RIGIFY_LIDS),
+  };
+}
+// blinking: every few seconds, a quick close and open (any body whose face can blink)
+const blink = { next: performance.now() + 2500, t: -1 };
+function blinkAmount(now) {
+  if (blink.t < 0 && now > blink.next) blink.t = now;
+  if (blink.t < 0) return 0;
+  const e = now - blink.t;
+  if (e > 170) { blink.t = -1; blink.next = now + 2200 + Math.random() * 4200; if (Math.random() < 0.15) blink.next = now + 250; return 0; }
+  return e < 70 ? e / 70 : 1 - (e - 70) / 100;
+}
+// Rocketbox faces have speech shapes (visemes) built in: AA_VI_10_aa, _11_E, _12_I, _13_O, _14_U, plus jaw and blinks
+// talking and blinking face shapes, by name: Rocketbox (AA_VI_*, AK_*) or Ready Player Me / Avaturn / ARKit (viseme_*, jawOpen...)
+const VISEME = { aa: ['AA_VI_10_aa', 'viseme_aa'], E: ['AA_VI_11_E', 'viseme_E'], I: ['AA_VI_12_I', 'viseme_I'], O: ['AA_VI_13_O', 'viseme_O'],
+  U: ['AA_VI_14_U', 'viseme_U'], jaw: ['AK_25_JawOpen', 'jawOpen'], blinkL: ['AK_09_EyeBlinkLeft', 'eyeBlinkLeft'],
+  blinkR: ['AK_10_EyeBlinkRight', 'eyeBlinkRight'], closed: ['eyesClosed'] };
+function morphFace() {
+  const meshes = [];
+  model.traverse((o) => {
+    const d = o.isMesh && o.morphTargetDictionary;
+    if (!d) return;
+    const idx = Object.fromEntries(Object.entries(VISEME).map(([k, names]) => [k, names.map((n) => d[n]).find((i) => i != null)]));
+    if (idx.blinkL != null) idx.closed = undefined; // a mesh that has proper blinks doesn't also need "eyes closed"
+    if (Object.values(idx).some((i) => i != null)) meshes.push({ o, idx });
+  });
+  return meshes.some((m) => m.idx.aa != null) ? { morph: true, meshes } : null;
+}
+function mouthBones() {
+  if (mouth.bones || !model) return mouth.bones;
+  const mf = BODY !== 'wow' && morphFace();
+  if (mf) return (mouth.bones = mf);
+  const rig = BODY !== 'wow' && rigifyFace();
+  if (rig) return (mouth.bones = rig);
+  let mesh = null; model.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+  const jaw = model.getObjectByName('bone_Jaw');
+  if (!mesh || !jaw) return (mouth.bones = false);
+  const rest = (b) => b && { b, p: b.position.clone(), q: b.quaternion.clone() };
+  mouth.bones = {
+    mesh, jaw: rest(jaw),
+    corners: Object.entries(MOUTH.corners).map(([n, side]) => ({ ...rest(model.getObjectByName(n)), side })).filter((x) => x.b),
+    upper: MOUTH.upper.map((n) => rest(model.getObjectByName(n))).filter(Boolean),
+  };
+  // which way opens her mouth: the WoW jaw turns on its own z axis; Nova's jaw turns on the world x axis (chin down and back)
+  if (BODY === 'wow') { mouth.bones.axis = zAxis.clone(); mouth.bones.amount = MOUTH.jawOpen; }
+  else { model.updateMatrixWorld(true); mouth.bones.axis = new THREE.Vector3(1, 0, 0).applyQuaternion(jaw.getWorldQuaternion(new THREE.Quaternion()).invert()).normalize(); mouth.bones.amount = 0.24; }
+  return mouth.bones;
+}
+// before the animation: face bones back to rest (animated ones get overwritten anyway, the rest don't drift)
+function restMouth() {
+  const m = mouthBones(); if (!m) return;
+  if (m.rigify) { for (const x of [...m.jaw, ...m.lips, ...m.centre, ...m.lids]) { x.b.position.copy(x.p); x.b.quaternion.copy(x.q); } return; }
+  if (m.morph) return; // morph weights are set fresh every frame
+  m.jaw.b.quaternion.copy(m.jaw.q);
+  for (const x of [...m.corners, ...m.upper]) x.b.position.copy(x.p);
+}
+// move a bone by an offset given in bind-pose space (scaled and turned into its parent's space)
+function nudge(b, dx, dy, dz, mesh) {
+  tmpV.set(dx, dy, dz).applyMatrix3(tmpM.setFromMatrix4(mesh.matrixWorld).multiply(new THREE.Matrix3().setFromMatrix4(mesh.bindMatrix)));
+  tmpV.applyMatrix3(tmpM.setFromMatrix4(b.parent.matrixWorld).invert());
+  b.position.add(tmpV);
+}
+function applyMouth(dt) {
+  const m = mouthBones(); if (!m) return;
+  const live = performance.now() - mouth.at < 250; // no level for a moment: she's stopped
+  const lv = live ? mouth.level : 0;
+  // a fast attack and a softer release, like a real jaw; tiny sounds stay closed
+  const target = Math.min(1, Math.max(0, (lv - 0.05) * 1.7));
+  mouth.open += (target - mouth.open) * (1 - Math.exp(-dt * (target > mouth.open ? 28 : 14)));
+  const talk = Math.min(1, mouth.open * 2.5);
+  const wideT = live ? Math.min(1, Math.max(0, (mouth.bright - 0.5) * 3.5)) * talk : 0;
+  const roundT = live ? Math.min(1, Math.max(0, (0.38 - mouth.bright) * 3.5)) * talk : 0;
+  const k = 1 - Math.exp(-dt * 16);
+  mouth.wide += (wideT - mouth.wide) * k; mouth.round += (roundT - mouth.round) * k;
+  if (m.morph) {
+    const o = mouth.open, wd = mouth.wide, rd = mouth.round, bl = blinkAmount(performance.now());
+    const w = { aa: 0.55 * o * Math.max(0, 1 - 0.6 * wd - 0.7 * rd), E: o > 0.02 ? 0.85 * wd : 0, I: o > 0.02 ? 0.35 * wd : 0,
+      O: o > 0.02 ? 0.8 * rd : 0, U: o > 0.02 ? 0.4 * rd : 0, jaw: 0.12 * o, blinkL: bl, blinkR: bl, closed: bl };
+    for (const { o: mesh, idx } of m.meshes) for (const [k, i] of Object.entries(idx)) if (i != null && k in w) mesh.morphTargetInfluences[i] = Math.min(1, w[k]);
+    return;
+  }
+  if (m.rigify) {
+    const JAW = 0.2; // radians at full open
+    for (const x of m.jaw) {
+      const q = tmpQ.setFromAxisAngle(m.axis, JAW * mouth.open * (1 - 0.3 * mouth.wide) * x.w);
+      x.b.position.copy(x.p).sub(m.pivot).applyQuaternion(q).add(m.pivot);
+      x.b.quaternion.copy(q).multiply(x.q);
+    }
+    for (const x of m.lips) // corners: out for "ee", in and forward for "oo"
+      x.b.position.addScaledVector(m.side, x.w * (0.004 * mouth.wide - 0.005 * mouth.round)).addScaledVector(m.front, 0.003 * mouth.round);
+    for (const x of m.centre) x.b.position.addScaledVector(m.front, 0.003 * mouth.round);
+    const bl = blinkAmount(performance.now());
+    if (bl > 0) for (const x of m.lids) x.b.position.addScaledVector(m.down, 0.0085 * bl * x.w);
+    return;
+  }
+  if (mouth.open < 0.002 && mouth.wide < 0.002 && mouth.round < 0.002) return;
+  m.mesh.updateMatrixWorld(true);
+  m.jaw.b.quaternion.multiply(tmpQ.setFromAxisAngle(m.axis, m.amount * mouth.open * (1 - 0.35 * mouth.wide)));
+  for (const c of m.corners) // wide: out and slightly up; round: in and forward
+    nudge(c.b, 0.004 * mouth.round, 0.0015 * mouth.wide - 0.002 * mouth.open, c.side * (0.006 * mouth.wide - 0.007 * mouth.round), m.mesh);
+  for (const u of m.upper) nudge(u.b, 0.004 * mouth.round, 0.0018 * mouth.open, 0, m.mesh); // the upper lip lifts a touch and pushes out on "oo"
+}
 function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h); composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta(); U.uTime.value += dt;
+  restMouth();
   mixer?.update(dt);
+  applyMouth(dt); // lip sync, on top of whatever she's playing
   body?.applyGaze?.(dt); // eye contact, on top of whatever she's playing
   if (spin && model) model.rotation.y += dt * 0.5;
   followHead(dt);
@@ -562,7 +731,7 @@ const body = {
       const baseClip = new THREE.AnimationClip('base', stand.duration, stand.tracks.filter((t) => !mapped.has(t.name.split('.')[0])));
       body.base = mixer.clipAction(baseClip); body.base.play();
     }
-    if (EMBED.has('embed')) { body.nextSwitch = 0; body.idle(); }
+    if (EMBED.has('embed') || !stand) { body.nextSwitch = 0; body.idle(); } // Nova: start moving straight away
   },
   pool() {
     const style = STYLE[body.moodName] || 'neutral';
@@ -598,7 +767,13 @@ const body = {
     cyan.set(MOOD_TINT[name] || '#3fe0ff');
     bloom.strength = 0.5 + 0.35 * strength * (['excited', 'happy', 'playful', 'proud'].includes(name) ? 1 : 0.4);
   },
-  level(v) { bloom.radius = 0.55 + v * 0.25; }, // voice level makes the glow breathe
+  // her voice, ~60 times a second: v = loudness 0-1 (the glow breathes, the jaw opens), bright = 0-1 how
+  // high the sound sits (her mouth's shape); pages that only know loudness leave bright out
+  level(v, bright) {
+    bloom.radius = 0.55 + v * 0.25;
+    mouth.level = Math.max(0, Math.min(1, Number(v) || 0)); mouth.at = performance.now();
+    if (bright != null) mouth.bright = Math.max(0, Math.min(1, bright));
+  },
   // ---- eye contact: her head and neck turn toward the face her webcam sees ----
   gaze: { yaw: 0, pitch: 0, tYaw: 0, tPitch: 0, lastSeen: 0 },
   lookAt(g) {
@@ -645,7 +820,9 @@ if (EMBED.has('embed')) {
     if (!body.gestureUntil && body.nextSwitch && now >= body.nextSwitch) body.idle();
   }, 150);
 }
-window.__lyra = { groups, look, U, setView, body };
+{ const bp = document.getElementById('bodyPick'); bp.value = BODY;
+  bp.onchange = () => { try { localStorage.setItem('lyra-body', bp.value); } catch {} const u = new URL(location.href); u.searchParams.delete('body'); location.href = u; }; }
+window.__lyra = { groups, look, U, setView, body, get model() { return model; }, get camera() { return camera; } };
 // Other pages on this PC (her dashboard's theater seat) can't reach window.__lyra across ports, so they
 // send messages instead: { lyraBody: 'speaking' | 'mood' | 'gesture' | 'listen' | 'think', args: [...] }.
 const BRIDGE = new Set(['speaking', 'mood', 'gesture', 'listen', 'think', 'level']);

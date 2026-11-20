@@ -54,7 +54,10 @@ export async function loadRetargeted(url, targetRoot, loader, { fps = 20, prefix
   const tgt = SkeletonUtils.clone(targetRoot);
   tgt.position.set(0, 0, 0);
   // start from the true bind pose (the clone copies whatever frame the live model was in)
-  tgt.traverse((o) => { if (o.isBone && /^bone_/.test(o.name) && !o.name.endsWith('_p')) { o.quaternion.identity(); o.position.set(0, 0, 0); o.scale.set(1, 1, 1); } });
+  // WoW: every bone sits under a "_p" pivot, so its bind pose is simply identity. Other rigs (Nova): ask the skin.
+  let pivots = false; tgt.traverse((o) => { if (o.name.endsWith('_p')) pivots = true; });
+  if (pivots) tgt.traverse((o) => { if (o.isBone && /^bone_/.test(o.name) && !o.name.endsWith('_p')) { o.quaternion.identity(); o.position.set(0, 0, 0); o.scale.set(1, 1, 1); } });
+  else tgt.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.pose(); });
   tgt.updateMatrixWorld(true);
   // three.js turns spaces in node names into underscores ("Bip01 L Hand" -> "Bip01_L_Hand")
   const byName = (root, n) => root.getObjectByName(n) || root.getObjectByName(n.replace(/ /g, '_'));

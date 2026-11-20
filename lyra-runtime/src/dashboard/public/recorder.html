@@ -47,15 +47,22 @@ function idleText() { bar(ready() ? 'Recorder ready. Waiting for her next Discor
 
 // the glow breathes with her voice while she talks
 let raf = 0;
+// How loud she is (0-1) and how bright the sound is (0-1: "oo" is dark, "ee" and "s" are bright), for her lip sync.
+function voiceShape(an, timeBuf, freqBuf, rate) {
+  an.getByteTimeDomainData(timeBuf); let s = 0; for (const v of timeBuf) s += ((v - 128) / 128) ** 2;
+  an.getByteFrequencyData(freqBuf);
+  const hz = rate / 2 / freqBuf.length; let w = 0, sum = 0;
+  for (let i = Math.floor(150 / hz); i < Math.min(freqBuf.length, 6000 / hz); i++) { w += freqBuf[i] * i * hz; sum += freqBuf[i]; }
+  const centroid = sum ? w / sum : 0;
+  return { level: Math.min(1, Math.sqrt(s / timeBuf.length) * 3.2), bright: Math.max(0, Math.min(1, (centroid - 700) / 2300)) };
+}
+// her mouth and glow follow her voice (a timer, not animation frames: those pause in a hidden window)
 function levels() {
-  const buf = new Uint8Array(analyser.fftSize);
-  const tick = () => {
-    analyser.getByteTimeDomainData(buf);
-    let sum = 0; for (const v of buf) sum += ((v - 128) / 128) ** 2;
-    try { body()?.level(Math.min(1, Math.sqrt(sum / buf.length) * 4)); } catch {}
-    raf = requestAnimationFrame(tick);
-  };
-  tick();
+  const timeBuf = new Uint8Array(analyser.fftSize), freqBuf = new Uint8Array(analyser.frequencyBinCount);
+  raf = setInterval(() => {
+    const { level, bright } = voiceShape(analyser, timeBuf, freqBuf, ctx.sampleRate);
+    try { body()?.level(level, bright); } catch {}
+  }, 16);
 }
 
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
@@ -88,11 +95,10 @@ async function record(job) {
     const src = ctx.createBufferSource(); src.buffer = buf; src.connect(analyser);
     const done = new Promise((ok) => (src.onended = ok));
     src.start();
-    if (/\?\s*$/.test(job.lines[i].text)) setTimeout(() => { try { b.gesture('think'); } catch {} }, buf.duration * 500);
     await done;
     await wait(120); // a small breath between sentences
   }
-  b.speaking(false); cancelAnimationFrame(raf); b.level(0);
+  b.speaking(false); clearInterval(raf); b.level(0);
   await wait(600); // she settles before the clip ends
   rec.stop(); await stopped;
   stream.getTracks().forEach((t) => t.kind === 'video' && t.stop());
