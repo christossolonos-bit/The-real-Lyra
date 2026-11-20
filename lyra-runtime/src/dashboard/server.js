@@ -353,6 +353,7 @@ function buildRoutes(bot) {
         ? { id: ownerId, name: 'Chris', username: 'solonaras2' }
         : { id: `holo:${name.toLowerCase()}`, name };
       const conversation = isOwner ? 'hologram' : `hologram:${name.toLowerCase()}`;
+      if (isOwner && !body.cue) (await import('../personal.js')).setAway(false, 'talked to her on the hologram');
       const key = `lyra-${conversation}`;
       const cue = body.cue ? String(body.cue).slice(0, 1500) : undefined;
       const text = cue ? '' : String(body.text || '').trim().slice(0, 1500);

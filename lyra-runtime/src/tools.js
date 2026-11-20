@@ -29,6 +29,7 @@ import { POWER as DEFAULT_VOCAL_POWER, effortTags } from './vocal-power.js';
 import { mindCommand, mindViewers, REGIONS as MIND_REGIONS, SCREENS as MIND_SCREENS, screenUrl as mindScreenUrl } from './mind-view.js';
 import { theater } from './theater.js';
 import { PERSONAL_TOOLS } from './personal.js';
+import { DOCUMENT_TOOLS } from './attachments.js';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // Discord's upload limit for bots in most servers
 
@@ -827,7 +828,7 @@ export const TOOLS = {
 };
 
 // Chris's personal skills: reminders, to-dos, ideas, wellbeing check-ins (personal.js)
-Object.assign(TOOLS, PERSONAL_TOOLS);
+Object.assign(TOOLS, PERSONAL_TOOLS, DOCUMENT_TOOLS);
 
 export function enabledTools(ctx = {}) {
   return Object.values(TOOLS)

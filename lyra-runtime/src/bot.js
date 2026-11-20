@@ -4,6 +4,7 @@ import { loadCommands } from './loadCommands.js';
 import { respond, SEARCH_ANNOUNCEMENT } from './companion.js';
 import { sessions } from './voice/session.js';
 import { requestClip, isMp4 } from './avatarVideo.js';
+import { readAttachments, recentDocumentsLine } from './attachments.js';
 import { activity } from './events.js';
 import { sleep } from './sleep.js';
 
@@ -88,14 +89,22 @@ function createClient() {
   });
 
   client.on(Events.MessageCreate, async (message) => {
-    if (message.author.bot || !message.content) return;
+    if (message.author.bot || (!message.content && !message.attachments.size)) return; // voice notes and files have no text
 
     const isDM = message.channel.type === ChannelType.DM;
     const mentioned = message.mentions.has(client.user, { ignoreEveryone: true, ignoreRoles: true });
     const openChannel = config.chatChannelIds.includes(message.channelId);
     if (!isDM && !mentioned && !openChannel) return;
 
-    const text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+    let text = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+    // voice messages, photos and files: what he said in a voice note joins the text; what she reads goes to her prompt
+    let attached = { said: '', extra: '' };
+    const isOwnerMsg = config.ownerIds.includes(message.author.id);
+    if (message.attachments.size) {
+      message.channel.sendTyping().catch(() => {});
+      attached = await readAttachments(message, { owner: isOwnerMsg, conversation: `text:${message.channelId}` });
+      text = [text, attached.said].filter(Boolean).join(' ').trim();
+    }
     if (!text) return;
 
     // Someone talking to her wakes her if she was asleep, then she answers.
@@ -119,6 +128,7 @@ function createClient() {
         conversation: `text:${message.channelId}`,
         speaker,
         text,
+        systemExtra: [attached.extra, isOwnerMsg ? recentDocumentsLine() : ''].filter(Boolean).join('\n\n') || undefined,
         onSearching: () =>
           message.reply({ content: `🔎 ${SEARCH_ANNOUNCEMENT}`, allowedMentions: { repliedUser: false } }).catch(() => {}),
         // voice: if she's in a voice channel in this server, typed music requests play there.

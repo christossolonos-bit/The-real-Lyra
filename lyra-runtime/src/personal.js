@@ -169,11 +169,43 @@ function wellbeingTool({ action, hours = 0 }) {
   return s > Date.now() ? `Check-ins are paused until ${when(s)}.` : 'Check-ins are on.';
 }
 
+// ---------- "I'm out" / "I'm back" (Chris, 2026-11-20) ----------
+// Out: he's away from the PC on his phone. Her check-ins on the hologram stop, and she keeps replies phone-sized.
+// Back: by telling her, or simply by talking to her on the hologram page again.
+export const presence = () => load().presence || { away: false };
+export function setAway(away, how = 'told her') {
+  const d = load();
+  const was = d.presence?.away || false;
+  d.presence = { away: Boolean(away), since: Date.now(), how };
+  save(d);
+  if (was !== Boolean(away)) activity('presence', { message: `Chris is ${away ? 'out' : 'back'} (${how})` });
+}
+export function presenceLine() {
+  const p = presence();
+  if (!p.away) return '';
+  const mins = Math.round((Date.now() - (p.since || Date.now())) / 60_000);
+  return `Chris is out: away from his PC since ${when(p.since)} (${mins < 90 ? `${mins} minutes` : `${Math.round(mins / 60)} hours`} ago), messaging you from his phone. Keep replies phone-sized. When he tells you he's back home, use your presence tool.`;
+}
+function presenceTool({ action }) {
+  if (action === 'out') { setAway(true); return "Marked as out: you'll message him on his phone, and no check-ins on the hologram until he's back."; }
+  if (action === 'back') { setAway(false); return 'Marked as back home.'; }
+  const p = presence();
+  return p.away ? `He's out (since ${when(p.since)}).` : "He's home (or hasn't said he's out).";
+}
+
 // ---------- the tools, for tools.js ----------
 const owner = (ctx) => Boolean(ctx?.perms?.owner);
 const fn = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } });
 
 export const PERSONAL_TOOLS = {
+  presence: {
+    enabled: owner,
+    definition: fn('presence',
+      "Whether Chris is out or at home. out = he's leaving / out / away from the PC (\"I'm heading out\", \"I'm at the shop\"); back = he's home / back at the PC. status = which.",
+      { action: { type: 'string', enum: ['out', 'back', 'status'] } },
+      ['action']),
+    run: presenceTool,
+  },
   reminder: {
     enabled: owner,
     definition: fn('reminder',
@@ -211,5 +243,5 @@ export const PERSONAL_TOOLS = {
 // for the dashboard / hologram server
 export function personalSnapshot() {
   const d = load();
-  return { reminders: d.reminders.filter((r) => !r.done), todos: d.todos.filter((t) => !t.done), wellbeing: d.wellbeing || {} };
+  return { reminders: d.reminders.filter((r) => !r.done), todos: d.todos.filter((t) => !t.done), wellbeing: d.wellbeing || {}, presence: d.presence || { away: false } };
 }

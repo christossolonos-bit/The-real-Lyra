@@ -234,7 +234,7 @@ async function careTick() {
   if (now - care.lastCheck < 45 * 60e3) return;
   try {
     const r = await fetch(`${RUNTIME}/api/personal`, { signal: AbortSignal.timeout(3000) }).then((x) => x.json());
-    if ((r.wellbeing?.snoozeUntil || 0) > now) return;
+    if ((r.wellbeing?.snoozeUntil || 0) > now || r.presence?.away) return; // snoozed, or he's out (on his phone)
   } catch {}
   const h = new Date().getHours(), mins = Math.round((now - care.sessionStart) / 60e3);
   const due = (kind, every) => now - (care.lastBy[kind] || 0) > every;

@@ -21,7 +21,7 @@ import { videoId as youtubeVideoId } from './theater-audio.js';
 import { theater } from './theater.js';
 import { core } from './core/index.js';
 import { timeLine, momentLabel } from './time.js';
-import { noteOwnerTurn } from './personal.js';
+import { noteOwnerTurn, presenceLine } from './personal.js';
 
 const VOICE_STYLE = `You are speaking out loud in a voice call. Keep replies short and conversational (usually 1-3 sentences). No markdown, lists, emoji, code blocks, or URLs: everything you write is read aloud by a text-to-speech voice. The user's words come from speech recognition and may contain mistakes; infer what they meant.`;
 
@@ -78,6 +78,7 @@ function systemPrompt({ voice, speaker, perms, memories, others, earlier, extra,
   if (earlier) parts.push(earlier);
   if (extra) parts.push(extra);
   parts.push(timeLine()); // Cyprus time, with the part of the day (time.js)
+  parts.push(presenceLine()); // "Chris is out, on his phone" (personal.js), or nothing
   return parts.filter(Boolean).join('\n\n');
 }
 

@@ -57,25 +57,36 @@ activity('sleep', { message: 'Sleep cycles armed' });
     try { return readFileSync(path.join(ROOT, '..', 'companion', '.env'), 'utf8'); } catch { return ''; }
   };
   const get = (env, k) => env.match(new RegExp(`^${k}=(.*)$`, 'm'))?.[1]?.trim() ?? '';
+  const { presence } = await import('./personal.js');
   startReminders(async (r) => {
     const env = companionEnv();
-    try {
-      const res = await fetch(`http://127.0.0.1:${get(env, 'PORT') || 8770}/api/announce`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90_000),
-        body: JSON.stringify({ ownerKey: get(env, 'OWNER_KEY'), kind: 'reminder', text: r.text, again: r.times > 0 }),
-      });
-      if ((await res.json()).delivered) return 'hologram';
-    } catch {}
+    const ways = [];
     const owner = config.ownerIds[0];
-    for (const s of sessions.values()) {
-      if (!s.destroyed && s.humans?.().some((m) => m.id === owner)) { s.say(`Chris, ${r.times ? 'just reminding you again' : 'your reminder'}: ${r.text}`); return 'Discord voice'; }
-    }
+    // always a DM, so it reaches his phone wherever he is (Chris, 2026-11-20)
     if (bot.client && owner) {
-      const user = await bot.client.users.fetch(owner);
-      await user.send(`⏰ ${r.times ? 'Reminder again' : 'Reminder'}: ${r.text}`);
-      return 'Discord DM';
+      try {
+        const user = await bot.client.users.fetch(owner);
+        await user.send(`⏰ ${r.times ? 'Reminder again' : 'Reminder'}: ${r.text}`);
+        ways.push('Discord DM');
+      } catch {}
     }
-    throw new Error('nowhere to remind him: hologram page closed and Discord offline');
+    // and out loud on the hologram page when he's home
+    if (!presence().away) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${get(env, 'PORT') || 8770}/api/announce`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90_000),
+          body: JSON.stringify({ ownerKey: get(env, 'OWNER_KEY'), kind: 'reminder', text: r.text, again: r.times > 0 }),
+        });
+        if ((await res.json()).delivered) ways.push('hologram');
+      } catch {}
+    }
+    if (!ways.length) {
+      for (const s of sessions.values()) {
+        if (!s.destroyed && s.humans?.().some((m) => m.id === owner)) { s.say(`Chris, ${r.times ? 'just reminding you again' : 'your reminder'}: ${r.text}`); ways.push('Discord voice'); break; }
+      }
+    }
+    if (!ways.length) throw new Error('nowhere to remind him: Discord offline and the hologram page closed');
+    return ways.join(' + ');
   });
 }
 
