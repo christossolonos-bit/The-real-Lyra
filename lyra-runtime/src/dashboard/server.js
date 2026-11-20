@@ -272,6 +272,8 @@ function buildRoutes(bot) {
       res.end();
       return undefined;
     }),
+    // Chris's reminders, to-dos and check-in snooze (personal.js)
+    r('GET', '/api/personal', async () => (await import('../personal.js')).personalSnapshot()),
     // Lyra Core: her own learning system's scoreboard (/core.html)
     r('GET', '/api/core', async () => (await import('../core/index.js')).core.stats()),
     r('POST', '/api/core/consolidate', async () => (await import('../core/index.js')).core.consolidate()),

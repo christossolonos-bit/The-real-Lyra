@@ -213,6 +213,46 @@ function earsListen() {
   return ears.micOn && !busy && !ears.speaking && Date.now() - ears.speakEnd > 700;
 }
 
+// ---------- wellbeing check-ins (Chris, 2026-11-20) ----------
+// Gentle, never naggy: after a long stretch without a break, very late at night (Cyprus time), or when her eyes
+// see him looking tired for a few minutes. At most one every 45 minutes, each kind at most every couple of hours,
+// never while either of them is talking, only with the hologram page open, and "not now" snoozes them (her
+// wellbeing tool, kept in the runtime).
+const care = {
+  lastActive: 0, sessionStart: 0, lastSpoke: 0, tiredSince: 0, lastCheck: 0, lastBy: {},
+  active() { const now = Date.now(); if (now - this.lastActive > 10 * 60e3) this.sessionStart = now; this.lastActive = now; this.lastSpoke = now; },
+  seen(expression) {
+    const now = Date.now();
+    if (now - this.lastActive > 10 * 60e3) this.sessionStart = now;
+    this.lastActive = now;
+    if (/tired|drooping/i.test(expression || "")) { this.tiredSince ||= now; } else this.tiredSince = 0;
+  },
+};
+async function careTick() {
+  const now = Date.now();
+  if (!clients.size || busy || ears.speaking || now - care.lastSpoke < 25e3 || now - care.lastActive > 10 * 60e3) return;
+  if (now - care.lastCheck < 45 * 60e3) return;
+  try {
+    const r = await fetch(`${RUNTIME}/api/personal`, { signal: AbortSignal.timeout(3000) }).then((x) => x.json());
+    if ((r.wellbeing?.snoozeUntil || 0) > now) return;
+  } catch {}
+  const h = new Date().getHours(), mins = Math.round((now - care.sessionStart) / 60e3);
+  const due = (kind, every) => now - (care.lastBy[kind] || 0) > every;
+  let kind = null, why = "";
+  if (h >= 1 && h < 5 && due("late", 2.5 * 3600e3)) { kind = "late"; why = `It's ${new Date().toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true })} in Cyprus and Chris is still up.`; }
+  else if (care.tiredSince && now - care.tiredSince > 3 * 60e3 && due("tired", 2 * 3600e3)) { kind = "tired"; why = "For the last few minutes your camera has seen Chris looking tired (eyes drooping)."; }
+  else if (mins >= 100 && due("long", 100 * 60e3)) { kind = "long"; why = `Chris has been at it for about ${mins >= 120 ? Math.round(mins / 60) + " hours" : mins + " minutes"} without a real break.`; }
+  if (!kind) return;
+  care.lastCheck = now; care.lastBy[kind] = now;
+  const content = `[check-in] ${why} Check in on him gently, like a friend would, in one or two sentences: a break, some water, food, fresh air, or sleep, whatever fits the moment and what you know about his day. Don't lecture and don't repeat yourself. If he says not now or to stop checking on him, use your wellbeing tool to snooze.`;
+  try {
+    const r = await turn({ name: mind.OWNER, isOwner: true, content, cue: true, logAs: `[${clock()}] (check-in: ${kind})` });
+    broadcast("reply", r);
+    console.log(`[check-in] ${kind}: ${String(r.speech || "").slice(0, 80)}`);
+  } catch (e) { console.log("[check-in] failed:", e.message); }
+}
+setInterval(() => careTick().catch(() => {}), 60e3).unref?.();
+
 const routes = {
   // someone opens the page / says hello
   "POST /api/hello": async (b) => {
@@ -225,6 +265,7 @@ const routes = {
   // they say something
   "POST /api/talk": async (b) => {
     const { name, isOwner } = who(b);
+    if (isOwner) care.active();
     const text = String(b.text || "").trim().slice(0, 1200);
     if (!text) return { error: "empty" };
     mind.arrive(name);
@@ -243,6 +284,7 @@ const routes = {
     const text = String(b.text || "").trim().slice(0, 1200);
     if (!text) return { error: "empty" };
     let { name, isOwner } = who(b);
+    if (isOwner) care.active();
     // The PC mic is Chris's, unless her eyes see someone she knows sitting there without him (Dad visiting...).
     if (visionFresh() && vision.main?.name && vision.main.name !== mind.OWNER && !vision.present.includes(mind.OWNER)) {
       name = vision.main.name; isOwner = false;
@@ -283,6 +325,7 @@ const routes = {
     vision.cameraOn = b.cameraOn !== false; vision.at = Date.now();
     vision.present = Array.isArray(b.present) ? b.present.slice(0, 8).map(String) : [];
     vision.unknown = !!b.unknown; vision.main = b.main || null;
+    if (vision.present.includes(mind.OWNER)) care.seen(vision.main?.name === mind.OWNER ? vision.main.expression : "");
     if (!vision.cameraOn) { vision.snapshot = null; vision.present = []; vision.main = null; }
     return { ok: true };
   },
@@ -302,6 +345,19 @@ const routes = {
       ? `[you see] ${seenName} just came into view of your camera${isOwner ? "" : ` (you know their face${b.firstTime ? " — you only just learned it" : ""})`}. Greet them warmly and naturally, by name, in a sentence or two.`
       : `[you see] Someone you don't recognise just came into view of your camera. Say hello in a friendly way and ask who they are, in a sentence or two.`;
     return turn({ name, isOwner, content, cue: true, logAs: `[${clock()}] (${name} came into view)` });
+  },
+  // Lyra speaks up on her own on this page: a reminder Chris asked for (from her runtime), or a check-in.
+  "POST /api/announce": async (b) => {
+    if (!who(b).isOwner) return { error: "owner only" };
+    if (!clients.size) return { delivered: false, why: "the hologram page isn't open" };
+    const text = String(b.text || "").slice(0, 400);
+    const now = new Date().toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true });
+    const content = b.kind === "reminder"
+      ? `[reminder] It's ${now}. Chris asked you to remind him now: "${text}". ${b.again ? "You already reminded him and he hasn't answered; say it again, a little more insistently but kindly." : "Remind him now, warmly and briefly, in your own words."} One or two sentences.`
+      : `[check-in] ${text}`;
+    const r = await turn({ name: mind.OWNER, isOwner: true, content, cue: true, logAs: `[${clock()}] (${b.kind || "announce"})` });
+    broadcast("reply", r);
+    return { delivered: !r.quiet && !!r.speech };
   },
   "POST /api/runtime": async () => {
     const up = await fetch(`${RUNTIME}/api/status`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok).catch(() => false);

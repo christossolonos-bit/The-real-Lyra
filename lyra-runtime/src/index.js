@@ -46,6 +46,39 @@ setInterval(() => { try { consolidateIfDue(coreLog); } catch {} }, 20 * 60_000).
 sleep.start();
 activity('sleep', { message: 'Sleep cycles armed' });
 
+// Chris's reminders (personal.js): out loud on the hologram page if it's open (in her own words), else in a
+// Discord voice call he's in, else a Discord DM.
+{
+  const { startReminders } = await import('./personal.js');
+  const { readFileSync } = await import('node:fs');
+  const path = (await import('node:path')).default;
+  const { ROOT } = await import('./config.js');
+  const companionEnv = () => {
+    try { return readFileSync(path.join(ROOT, '..', 'companion', '.env'), 'utf8'); } catch { return ''; }
+  };
+  const get = (env, k) => env.match(new RegExp(`^${k}=(.*)$`, 'm'))?.[1]?.trim() ?? '';
+  startReminders(async (r) => {
+    const env = companionEnv();
+    try {
+      const res = await fetch(`http://127.0.0.1:${get(env, 'PORT') || 8770}/api/announce`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90_000),
+        body: JSON.stringify({ ownerKey: get(env, 'OWNER_KEY'), kind: 'reminder', text: r.text, again: r.times > 0 }),
+      });
+      if ((await res.json()).delivered) return 'hologram';
+    } catch {}
+    const owner = config.ownerIds[0];
+    for (const s of sessions.values()) {
+      if (!s.destroyed && s.humans?.().some((m) => m.id === owner)) { s.say(`Chris, ${r.times ? 'just reminding you again' : 'your reminder'}: ${r.text}`); return 'Discord voice'; }
+    }
+    if (bot.client && owner) {
+      const user = await bot.client.users.fetch(owner);
+      await user.send(`⏰ ${r.times ? 'Reminder again' : 'Reminder'}: ${r.text}`);
+      return 'Discord DM';
+    }
+    throw new Error('nowhere to remind him: hologram page closed and Discord offline');
+  });
+}
+
 // Continuity: a heartbeat so downtime is known after a restart, plus her recent mistakes.
 startContinuity();
 

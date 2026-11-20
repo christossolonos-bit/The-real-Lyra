@@ -21,6 +21,7 @@ import { videoId as youtubeVideoId } from './theater-audio.js';
 import { theater } from './theater.js';
 import { core } from './core/index.js';
 import { timeLine, momentLabel } from './time.js';
+import { noteOwnerTurn } from './personal.js';
 
 const VOICE_STYLE = `You are speaking out loud in a voice call. Keep replies short and conversational (usually 1-3 sentences). No markdown, lists, emoji, code blocks, or URLs: everything you write is read aloud by a text-to-speech voice. The user's words come from speech recognition and may contain mistakes; infer what they meant.`;
 
@@ -197,6 +198,7 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     noteContact({ userId: speaker.id, name: speaker.name, username: speaker.username, dm: speaker.dm });
   }
   const perms = permissions(speaker.id);
+  if (!cue && perms.owner) noteOwnerTurn(); // he's talking to her: any reminder she just gave counts as heard
   // Introductions are only done out loud, when someone joins voice.
   // Introductions and the check-in question are asked in person, in voice, only.
   due ??= cue || !character.main ? [] : obligationsFor(speaker.id, [speaker.name, speaker.username]).filter((o) => voice || !['intro', 'consent'].includes(o.kind));
