@@ -1,3 +1,4 @@
+import { waitFor } from './endpoint.js';
 import {
   joinVoiceChannel,
   createAudioPlayer,
@@ -246,6 +247,33 @@ class VoiceSession {
     stream.once('error', () => this.listening.delete(userId));
   }
 
+  // Holds a person's words after they pause. Resolves with the whole turn once they've really finished, or with
+  // null for a piece that joined a turn already waiting (that one delivers everything).
+  gather(userId, text) {
+    this.held ??= new Map();
+    const waiting = this.held.get(userId);
+    if (waiting) {
+      waiting.text = `${waiting.text} ${text}`.trim();
+      clearTimeout(waiting.timer);
+      waiting.timer = setTimeout(waiting.fire, waitFor(waiting.text));
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const entry = { text, start: Date.now() };
+      entry.fire = () => {
+        // still talking (a new piece of speech has started): keep waiting, up to 30 s for one turn
+        if (this.listening.has(userId) && Date.now() - entry.start < 30_000) {
+          entry.timer = setTimeout(entry.fire, 250);
+          return;
+        }
+        this.held.delete(userId);
+        resolve(entry.text);
+      };
+      entry.timer = setTimeout(entry.fire, waitFor(text));
+      this.held.set(userId, entry);
+    });
+  }
+
   async handleUtterance(userId, pcm) {
     const member = this.guild.members.cache.get(userId) ?? (await this.guild.members.fetch(userId).catch(() => null));
     const baseName = member?.displayName ?? 'Someone';
@@ -255,8 +283,11 @@ class VoiceSession {
       username: member?.user.username,
     };
 
-    const text = await transcribeSpeech(pcm);
-    if (!text) return;
+    const heard = await transcribeSpeech(pcm);
+    if (!heard) return;
+    // a pause isn't the end: hold the words a moment, and join anything said next into the same turn
+    const text = await this.gather(userId, heard);
+    if (text === null) return; // joined onto the turn that's already waiting
     this.lastHeard = Date.now(); // anyone talking, to her or not: she won't speak up over a conversation
     if (config.voice.postTranscripts) this.post(`🎙️ **${speaker.name}:** ${text}`);
 

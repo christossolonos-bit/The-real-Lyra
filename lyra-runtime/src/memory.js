@@ -82,6 +82,12 @@ try {
   db.exec('ALTER TABLE messages ADD COLUMN tools TEXT');
 } catch {} // already there
 
+// Emotional memory (Chris, 2026-11-20): a memory also keeps how the person seemed when they said it, and when
+// ("Thursday night, by voice"), so she can bring it back with the feeling, not just the fact.
+for (const col of ['feeling TEXT', 'moment TEXT', "kind TEXT DEFAULT 'fact'"]) {
+  try { db.exec(`ALTER TABLE memories ADD COLUMN ${col}`); } catch {} // already there
+}
+
 const q = {
   addMessage: db.prepare(
     'INSERT INTO messages (conversation, role, user_id, name, content, created_at, tools) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -113,8 +119,9 @@ const q = {
   markRolledUp: db.prepare('UPDATE summaries SET rolled_up = 1 WHERE conversation = ? AND level = 1 AND id <= ?'),
   allSummaries: db.prepare('SELECT * FROM summaries WHERE conversation = ? ORDER BY id DESC'),
   addMemory: db.prepare('INSERT INTO memories (user_id, content, embedding, created_at) VALUES (?, ?, ?, ?)'),
-  userMemories: db.prepare('SELECT id, content, embedding FROM memories WHERE user_id = ?'),
-  listMemories: db.prepare('SELECT id, content, created_at FROM memories WHERE user_id = ? ORDER BY id'),
+  addMemoryFelt: db.prepare('INSERT INTO memories (user_id, content, embedding, created_at, feeling, moment, kind) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+  userMemories: db.prepare('SELECT id, content, embedding, feeling, moment, kind FROM memories WHERE user_id = ?'),
+  listMemories: db.prepare('SELECT id, content, created_at, feeling, moment, kind FROM memories WHERE user_id = ? ORDER BY id'),
   deleteMemory: db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?'),
   deleteAllMemories: db.prepare('DELETE FROM memories WHERE user_id = ?'),
   memoryUsers: db.prepare(
@@ -268,29 +275,37 @@ export async function recall(userId, query) {
     return []; // embedder down
   }
   return rows
-    .map((r) => ({ id: r.id, content: r.content, score: cosine(qv, JSON.parse(r.embedding)) }))
+    .map((r) => ({ id: r.id, content: r.content, feeling: r.feeling || null, moment: r.moment || null, kind: r.kind || 'fact', score: cosine(qv, JSON.parse(r.embedding)) }))
     .filter((r) => r.score >= config.memory.minScore)
     .sort((a, b) => b.score - a.score)
     .slice(0, config.memory.topK);
 }
 
-// Stores facts, skipping any that are near-duplicates of what we already know.
-export async function remember(userId, facts) {
-  if (!facts.length) return [];
+// Stores facts, skipping any that are near-duplicates of what we already know. A fact is a string, or
+// { text, feeling, moment, kind } to keep how the person seemed and when (kind: 'fact' or 'moment').
+// A near-duplicate that now comes with a feeling the old one lacked gets the feeling added.
+export async function remember(userId, items) {
+  if (!items.length) return [];
+  const list = items.map((f) => (typeof f === 'string' ? { text: f } : f));
+  const facts = list.map((f) => f.text);
   let vectors;
   try {
     vectors = await embed(facts, { inputType: 'passage' });
   } catch {
     return []; // embedder down
   }
-  const existing = q.userMemories.all(userId).map((r) => JSON.parse(r.embedding));
+  const rows = q.userMemories.all(userId).map((r) => ({ ...r, v: JSON.parse(r.embedding) }));
   const saved = [];
-  facts.forEach((fact, i) => {
+  list.forEach((f, i) => {
     const v = vectors[i];
-    if (existing.some((e) => cosine(v, e) >= config.memory.dedupeScore)) return;
-    q.addMemory.run(userId, fact, JSON.stringify(v), Date.now());
-    existing.push(v);
-    saved.push(fact);
+    const twin = rows.find((r) => cosine(v, r.v) >= config.memory.dedupeScore);
+    if (twin) {
+      if (f.feeling && !twin.feeling) db.prepare('UPDATE memories SET feeling = ?, moment = ? WHERE id = ?').run(f.feeling, f.moment ?? null, twin.id);
+      return;
+    }
+    q.addMemoryFelt.run(userId, f.text, JSON.stringify(v), Date.now(), f.feeling || null, f.moment || null, f.kind || 'fact');
+    rows.push({ v, feeling: f.feeling });
+    saved.push(f.feeling ? `${f.text} (${f.feeling})` : f.text);
   });
   return saved;
 }

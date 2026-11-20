@@ -145,7 +145,10 @@ export function createCore({ file, now = Date.now } = {}) {
   }
 
   // ---------- beliefs: small facts as links ----------
-  const clean = (s) => String(s).split(/\b(?:and|but|so|because|cause|though|which|who)\b|[,.;!?]/i)[0].trim().slice(0, 40);
+  const clean = (s) => {
+    const t = String(s).split(/\b(?:and|but|so|because|cause|though|which|who)\b|[,.;!?]/i)[0].trim();
+    return t.length <= 60 ? t : t.slice(0, 60).replace(/\s+\S*$/, ''); // whole words only
+  };
   const SINGLE = new Set(['is called', 'lives in', 'works at', 'birthday is']); // one true answer at a time
   function believe(subj, rel, obj, { t = now(), source = 'heard', why = null, strength = 0.5 } = {}) {
     obj = clean(obj);
@@ -272,5 +275,15 @@ export function createCore({ file, now = Date.now } = {}) {
 
   function rememberName(id, name) { if (id && name) meta(`name:${id}`, name); }
 
-  return { draft, observe: (x) => { rememberName(x?.speaker?.id, x?.speaker?.name); return observe(x); }, reason, consolidate, stats, believe, close: () => db.close() };
+  // How someone felt, from her emotional memories: by time of day (for habits like "often tired at night") and
+  // about what ("felt stressed about the Episode 12 deadline").
+  function noteFeeling(name, feeling, topic, ts = now()) {
+    const words = String(feeling || '').toLowerCase().match(/[a-z']+/g) ?? [];
+    const main = words.find((w) => !['and', 'a', 'bit', 'very', 'quite', 'really', 'so', 'kind', 'of', 'little', 'quietly'].includes(w));
+    if (!main) return;
+    st.momentAdd.run(name, `feels ${main}`, partOfDay(new Date(ts)));
+    if (topic) believe(name, `felt ${feeling.toLowerCase()} about`, topic, { t: ts, source: 'heard', strength: 0.6 });
+  }
+
+  return { draft, observe: (x) => { rememberName(x?.speaker?.id, x?.speaker?.name); return observe(x); }, reason, consolidate, stats, believe, noteFeeling, meta, close: () => db.close() };
 }

@@ -373,6 +373,7 @@ function buildRoutes(bot) {
         voice: true,
         onSentence,
         discord: { client: online() },
+        seen: body.sees ? String(body.sees).slice(0, 800) : '', // how Chris looked: kept with what she remembers
         systemExtra: [
           `Right now you're talking through your hologram on Chris's computer${isOwner ? ', with Chris himself' : `, with ${name}, a visitor at the campus terminal`}. ` +
             `Whatever you say is spoken out loud in your voice, so keep it to plain spoken sentences.`,

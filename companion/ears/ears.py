@@ -108,6 +108,29 @@ def serve_transcription(whisper, lock):
     print(f"Discord voice transcription on http://127.0.0.1:{port}/transcribe")
 
 
+# A pause isn't the end of a sentence (Chris: "I'd like to finish my sentences even if I pause").
+# Each pause ends a piece of speech, but the words are held: a short beat if it sounds finished, longer if it
+# sounds cut off ("and...", "so...", "the..."). Speaking again in that time joins the same turn.
+# Same rules as lyra-runtime/src/voice/endpoint.js (Discord voice).
+import re
+GRACE_S = float(ENV.get("EARS_GRACE_MS", "700")) / 1000  # from companion/.env
+THINK_S = float(ENV.get("EARS_THINK_MS", "2600")) / 1000
+TRAILING = re.compile(r"\b(and|but|so|or|because|cause|cuz|um+|uh+|er+|like|the|a|an|to|of|with|for|from|in|on|at|if|when|while|that|which|who|what|my|your|our|their|his|her|i|i'm|im|it's|is|was|are|were|then|also|just|maybe|actually|well|about|into|than|as|not|really|very|kind of|sort of|you know|i mean|let me|i think|i want|i need)[,.…-]*$", re.I)
+
+
+def sounds_unfinished(text):
+    t = text.strip()
+    if not t:
+        return False
+    if re.search(r"(\.\.\.|…|,|-|–)$", t) or TRAILING.search(t):
+        return True
+    return not re.search(r"[.!?][\"')]*$", t)
+
+
+def wait_for(text):
+    return THINK_S if sounds_unfinished(text) else GRACE_S
+
+
 # Whisper sometimes "hears" these in silence or noise
 JUNK = {"", "you", "thank you.", "thanks for watching!", "thank you for watching.", "bye.", ".", "uh", "um", "hmm"}
 
@@ -130,6 +153,7 @@ def main():
                             callback=lambda data, frames, t, status: q.put(data[:, 0].copy()))
     stream.start()
 
+    held = None       # words said so far in this turn, waiting in case there's more: {"text", "until"}
     pre = []          # a little audio from before speech starts
     speech = None     # audio of the current sentence
     state = {"listen": False}
@@ -145,8 +169,20 @@ def main():
             if state.get("offline"):
                 print("Waiting for Lyra's server...", end="\r")
 
+        # the turn is over: nothing more said in time (and not mid-word right now)
+        if held and speech is None and now >= held["until"]:
+            text, held = held["text"], None
+            print(f"Heard: {text}")
+            try:
+                r = post("/api/heard", {"ownerKey": OWNER_KEY, "text": text}, timeout=5)
+                if r.get("error"):
+                    print("  ->", r["error"])
+            except Exception as e:
+                print("  -> couldn't reach Lyra:", e)
+
         if not state.get("listen"):
             # she's speaking / thinking / mic off: drop everything and reset
+            held = None
             if speech is not None:
                 speech = None
             vad.reset_states()
@@ -180,13 +216,12 @@ def main():
                 try: post("/api/ears/activity", {"ownerKey": OWNER_KEY, "state": "idle"})
                 except Exception: pass
                 continue
-            print(f"Heard ({seconds:.1f}s): {text}")
-            try:
-                r = post("/api/heard", {"ownerKey": OWNER_KEY, "text": text}, timeout=5)
-                if r.get("error"):
-                    print("  ->", r["error"])
-            except Exception as e:
-                print("  -> couldn't reach Lyra:", e)
+            # hold it: maybe there's more to this sentence
+            held = {"text": f'{held["text"]} {text}'.strip() if held else text}
+            held["until"] = time.time() + wait_for(held["text"])
+            print(f"  ...({seconds:.1f}s) {text}  [waiting {wait_for(held['text']):.1f}s for more]")
+            try: post("/api/ears/activity", {"ownerKey": OWNER_KEY, "state": "hearing"})
+            except Exception: pass
 
 
 if __name__ == "__main__":

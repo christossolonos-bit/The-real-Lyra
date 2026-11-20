@@ -1,4 +1,6 @@
 import 'dotenv/config';
+// Lyra lives in Cyprus time: every clock in her runtime (her prompt, sleep, Lyra Core's night work) is Cyprus time
+process.env.TZ = process.env.LYRA_TIMEZONE || 'Europe/Nicosia';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -105,6 +107,9 @@ export const config = {
     // Voice channels the bot may join. Empty = any.
     channelIds: list(env.VOICE_CHANNEL_IDS),
     silenceMs: num(env.VOICE_SILENCE_MS, 800),
+    // after a pause: hold the words this long for more (finished-sounding / cut-off-sounding), see voice/endpoint.js
+    graceMs: num(env.VOICE_GRACE_MS, 700),
+    thinkMs: num(env.VOICE_THINK_MS, 2600),
     minSpeechMs: num(env.VOICE_MIN_SPEECH_MS, 400), // talking this long interrupts the bot
     // Sounds shorter than this are ignored, so coughs and clicks don't become "thank you".
     minUtteranceMs: num(env.VOICE_MIN_UTTERANCE_MS, 1500),

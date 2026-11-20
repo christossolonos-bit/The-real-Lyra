@@ -10,26 +10,37 @@ import { activity } from './events.js';
 
 export const MEMORY_TASK = (names, botName) =>
   `"facts": durable facts worth remembering about the people in this conversation: ${names.join(', ')}. Preferences, plans, relationships, life details, things they asked to be remembered. ` +
-  `Each fact is {"about": "<exactly one of: ${names.join(', ')}>", "fact": "<short standalone sentence starting with that person's name>"}. ` +
+  `Each fact is {"about": "<exactly one of: ${names.join(', ')}>", "fact": "<short standalone sentence starting with that person's name>", "feeling": "<how that person seemed while sharing it, 2-6 plain words (e.g. 'excited and proud', 'stressed, hadn't slept', 'quietly sad'), from their words, tone and the 'how they seemed' notes; empty string if neutral or unclear>"}. ` +
   `Get the person right: a fact belongs to whoever it is TRUE of, not whoever said it. If Travis says "my boy Brandon's girlfriend is Katie", that fact is about Brandon, not Travis. ` +
   `People may be called by a nickname or real name instead of their screen name; match them to the screen name from who is speaking and who is being addressed. ` +
   `Only keep facts that will still be true and useful weeks from now: who they are, their family, partner and friends, work, projects, interests, habits, strong opinions, plans. ` +
   `Skip: what someone said or asked in the moment, advice they gave, reactions, time of day, being tired or hungry right now, guesses ("likely", "implied", "or similar"), anything you're unsure who it belongs to, ` +
   `facts about anyone not in that list, small talk, anything already known, traits people assign to ${botName}, and requests about how ${botName} should act (those are persona changes, not facts). ` +
-  `Fewer, solid facts beat many weak ones. Empty list if nothing new.`;
+  `Fewer, solid facts beat many weak ones. Empty list if nothing new.\n` +
+  `"moments": emotionally meaningful moments worth remembering between conversations, beyond facts: when someone was clearly moved, hurt, ` +
+  `thrilled, proud, worried, laughing hard, or opened up about something personal. Each is {"about": "<one of: ${names.join(', ')}>", ` +
+  `"moment": "<one short sentence of what happened, starting with their name, e.g. 'Chris laughed hard when ${botName} mixed up Solo and Patch'>", ` +
+  `"feeling": "<2-6 words>"}. Only real, notable feelings; ordinary chat is not a moment. Usually an empty list.`;
 
 // Saves extracted facts under the right people. people: [{ id, name }]; a bare string fact (older
 // prompt format) counts as being about fallbackName. Returns how many were saved.
-export async function fileFacts(facts, people, fallbackName) {
+// Each saved fact keeps how the person seemed (feeling) and when (moment, e.g. "Thursday night, by voice");
+// moments are emotional memories ("Chris laughed hard when...") saved the same way, kind 'moment'.
+export async function fileFacts(facts, people, fallbackName, { moment = null, moments = [] } = {}) {
   const byPerson = new Map();
-  for (const f of Array.isArray(facts) ? facts.slice(0, 12) : []) {
+  const feelingOf = (f) => (typeof f?.feeling === 'string' ? f.feeling.trim().replace(/[.]+$/, '').slice(0, 60) : '');
+  const all = [
+    ...(Array.isArray(facts) ? facts.slice(0, 12) : []).map((f) => ({ f, kind: 'fact' })),
+    ...(Array.isArray(moments) ? moments.slice(0, 3) : []).map((f) => ({ f: { ...f, fact: f?.moment }, kind: 'moment' })),
+  ];
+  for (const { f, kind } of all) {
     const fact = typeof f === 'string' ? f.trim() : typeof f?.fact === 'string' ? f.fact.trim() : '';
     if (!fact) continue;
     const about = (typeof f === 'object' && typeof f.about === 'string' ? f.about : fallbackName ?? '').trim().toLowerCase();
     const person = people.find((p) => p.name.toLowerCase() === about);
     if (!person || !permissions(person.id).remember) continue;
     if (!byPerson.has(person)) byPerson.set(person, []);
-    byPerson.get(person).push(fact);
+    byPerson.get(person).push({ text: fact, feeling: feelingOf(f) || null, moment, kind });
   }
   let count = 0;
   for (const [person, list] of byPerson) {
@@ -73,7 +84,7 @@ export function rebuildMemories({ fresh = false, only = null } = {}) {
           activity('error', { where: 'memory rebuild', message: err.message });
           return null;
         });
-        saved += await fileFacts(result?.facts, people);
+        saved += await fileFacts(result?.facts, people, undefined, { moments: result?.moments });
       }
     }
     activity('persona', { reason: `Memory rebuild done: read ${read} messages, saved ${saved} memories in ${Math.round((Date.now() - started) / 1000)}s`, changedBy: 'owner' });

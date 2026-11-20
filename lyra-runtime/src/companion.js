@@ -20,6 +20,7 @@ import { musicAsk, musicArgsFromAsk } from './music.js';
 import { videoId as youtubeVideoId } from './theater-audio.js';
 import { theater } from './theater.js';
 import { core } from './core/index.js';
+import { timeLine, momentLabel } from './time.js';
 
 const VOICE_STYLE = `You are speaking out loud in a voice call. Keep replies short and conversational (usually 1-3 sentences). No markdown, lists, emoji, code blocks, or URLs: everything you write is read aloud by a text-to-speech voice. The user's words come from speech recognition and may contain mistakes; infer what they meant.`;
 
@@ -63,18 +64,19 @@ function systemPrompt({ voice, speaker, perms, memories, others, earlier, extra,
   if (memories.length) {
     parts.push(
       `Things you remember about ${speaker.name} (use naturally, don't recite them):\n` +
-        memories.map((m) => `- ${m.content}`).join('\n'),
+        memories.map((m) => `- ${m.content}${felt(m, speaker.name)}`).join('\n') +
+        (memories.some((m) => m.feeling) ? `\nSome of these carry how ${speaker.name} seemed back then. Let that shape how you bring things up: check in gently on what weighed on them, share the joy of what lit them up. Don't recite the labels.` : ''),
     );
   }
   if (others?.length) {
     parts.push(
       `Things you remember about the other people here (each fact is about the person it's listed under; don't mix them up):\n` +
-        others.map((o) => `${o.name}:\n${o.memories.map((m) => `- ${m.content}`).join('\n')}`).join('\n'),
+        others.map((o) => `${o.name}:\n${o.memories.map((m) => `- ${m.content}${felt(m, o.name)}`).join('\n')}`).join('\n'),
     );
   }
   if (earlier) parts.push(earlier);
   if (extra) parts.push(extra);
-  parts.push(`Current time: ${new Date().toLocaleString()}`);
+  parts.push(timeLine()); // Cyprus time, with the part of the day (time.js)
   return parts.filter(Boolean).join('\n\n');
 }
 
@@ -176,7 +178,14 @@ export async function planTurn(history, speaker, text, tools) {
 // Nothing is said by a person, so only the character's line is saved and nothing is memorised.
 // due: obligations to fulfil in this reply (the voice session passes them when someone joins);
 // otherwise any waiting on the speaker are picked up here. Either way they're checked off after.
-export async function respond({ conversation, speaker, text, voice = false, onSentence, onSearching, systemExtra, character = mainCharacter(), cue, discord = {}, due }) {
+// "(Chris seemed stressed and tired: Tuesday night, 18 Nov, by voice)"
+function felt(m, name) {
+  if (!m.feeling && !m.moment) return '';
+  if (!m.feeling) return ` (${m.moment})`;
+  return ` (${name} seemed ${m.feeling}${m.moment ? `: ${m.moment}` : ''})`;
+}
+
+export async function respond({ conversation, speaker, text, voice = false, onSentence, onSearching, systemExtra, character = mainCharacter(), cue, discord = {}, due, seen = '' }) {
   // Continuity: when this person and this conversation were last active (read before updating).
   const speakerLastSeen = listContacts().find((c) => c.user_id === speaker.id)?.last_seen ?? null;
   const convLastActive = continuity.touch(conversation);
@@ -479,7 +488,8 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // remembered; each fact is filed under the person it's about.
   if (!cue && (perms.remember || people.some((p) => permissions(p.id).remember))) {
     const context = rows.slice(-10).map((m) => `${m.role === 'assistant' ? m.name ?? config.botName : m.name}: ${m.content}`).join('\n');
-    queueMemoryExtraction({ speaker, text, reply, known: memories, character, context, people: [{ id: speaker.id, name: speaker.name }, ...people] });
+    queueMemoryExtraction({ speaker, text, reply, known: memories, character, context, people: [{ id: speaker.id, name: speaker.name }, ...people],
+      seen, moment: `${momentLabel()}${voice ? ', by voice' : ', in text'}` });
   }
   return reply;
 }
@@ -644,7 +654,7 @@ const PERSONA_TASK = (name, botName) =>
   `2. "persona_change": null, UNLESS ${name} directly asked ${botName} to change who it is or how it behaves from now on: personality, attitude, speaking style, name, backstory, opinions, likes/dislikes, habits (e.g. "be more sarcastic", "stop using emoji", "your name is Rex now", "you're a Lakers fan now"). Compliments, questions about the bot, one-off requests ("say it like a pirate"), and requests the bot refused in its reply are NOT changes.
 When there is a change, return {"summary": "<few words, e.g. more sarcastic>", "name": "<new name, or null if unchanged>", "persona": "<the COMPLETE rewritten persona>"}. Rewrite the current persona with the change woven in: keep every unaffected trait, drop anything the change contradicts, under 250 words. Write it as instructions addressed to the bot in second person ("You're...", "You love..."), never "I" or "me". Don't mention the name in it.`;
 
-async function reflect({ speaker, text, reply, known, character = mainCharacter(), context = '', people = [{ id: speaker.id, name: speaker.name }] }) {
+async function reflect({ speaker, text, reply, known, character = mainCharacter(), context = '', people = [{ id: speaker.id, name: speaker.name }], seen = '', moment = null }) {
   const allowPersona = canEditPersona(speaker.id);
   // On the active brain: OpenRouter models pick out facts and people far more reliably than the
   // small local model (quickJson falls back to Ollama when that's the brain).
@@ -655,7 +665,7 @@ async function reflect({ speaker, text, reply, known, character = mainCharacter(
         `You maintain a companion bot named ${character.name}. Analyze the latest exchange below (the earlier lines are context, already handled) and reply with JSON containing:`,
         `1. ${MEMORY_TASK(people.map((p) => p.name), character.name)}`,
         allowPersona && PERSONA_TASK(speaker.name, character.name),
-        allowPersona ? `Format: {"facts": [...], "persona_change": null | {...}}` : `Format: {"facts": [...]}`,
+        allowPersona ? `Format: {"facts": [...], "moments": [...], "persona_change": null | {...}}` : `Format: {"facts": [...], "moments": [...]}`,
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -666,11 +676,12 @@ async function reflect({ speaker, text, reply, known, character = mainCharacter(
         (allowPersona ? `Current persona:\n"""\n${character.persona || '(none yet)'}\n"""\n\n` : '') +
         (known.length ? `Already known about ${speaker.name}:\n${known.map((m) => `- ${m.content}`).join('\n')}\n\n` : '') +
         (context ? `Earlier in the conversation:\n${context}\n\n` : '') +
+        (seen ? `How they seemed (what ${character.name}'s camera saw while they spoke):\n${seen}\n\n` : '') +
         `Latest exchange:\n${speaker.name}: ${text}\n${character.name}: ${reply}`,
     },
   ]);
 
-  await fileFacts(result?.facts, people, speaker.name);
+  await fileFacts(result?.facts, people, speaker.name, { moment, moments: result?.moments });
 
   const change = result?.persona_change;
   if (allowPersona && change && typeof change.persona === 'string' && change.persona.trim().length > 20) {

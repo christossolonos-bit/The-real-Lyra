@@ -4,6 +4,8 @@
 //   /            talk page (avatar + mic + chat)
 //   /creator/    the character creator (same origin, so the saved look is shared)
 
+// Lyra lives in Cyprus time (her standalone mind and anything time-stamped here)
+process.env.TZ = process.env.LYRA_TIMEZONE || "Europe/Nicosia";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
