@@ -124,7 +124,7 @@ export function summaryText(month = monthOf(today())) {
   const { by, total } = totals(d, month);
   const last = totals(d, prevMonth(month)).total;
   const cats = Object.entries(by).sort((a, b) => b[1] - a[1]);
-  if (!cats.length) return `Nothing logged for ${monthName(month)}.`;
+  if (!cats.length) { const acc = accountsLine(d); return `Nothing spent logged for ${monthName(month)} yet.${acc ? ` Accounts now: ${acc}.` : ''}`; }
   const lines = cats.map(([c, v]) => `${c} ${eur(v)}${d.budgets[c] ? ` of ${eur(d.budgets[c])}` : ''}`);
   const left = d.budgets.total ? ` Budget: ${eur(d.budgets.total)} (${eur(d.budgets.total - total)} left).` : '';
   const income = d.income.filter((i) => monthOf(i.date) === month).reduce((s, i) => s + i.amount, 0);

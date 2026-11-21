@@ -123,6 +123,8 @@ export async function planTurn(history, speaker, text, tools) {
         `- music when they ask to play/put on/queue a song in Discord voice from Spotify, radio, the local library, or a song title (not a YouTube watch link) — spoken asks count ("play X on spotify", "put on BBC radio 1", "play never gonna give you up"). Also pause, resume, skip, stop, or what's playing.\n` +
         `- update_persona when asked to change her personality, persona, character prompt, how she talks, or her name (dashboard Personality tab).\n` +
         `- generate_music only when the conversation already says what the song should be about (topic, mood or style) AND how long (a 30-second clip or a full song). If either is missing, pick nothing so ${config.botName} can ask.\n` +
+        `- money for anything about his money: spending, bills, budgets, account balances, money in or moved, "how much do I have", "check my finance". Pick it even if it was answered earlier in the conversation: balances change, and the answer must come from the tracker, never from memory.\n` +
+        `- documents for questions about a file or photo he sent (what it says or shows), even if asked before.\n` +
         `- When unsure, pick nothing.\n` +
         `Reply as JSON only: {"actions": [{"tool": "<name>", "query": "<web_search only>"}], "reason": "<a few words>"}. Use {"actions": []} when nothing is needed.`,
     },
@@ -159,6 +161,8 @@ export async function planTurn(history, speaker, text, tools) {
   if (theaterAsk(text) || (showing && /\b(theater|theatre|video|watching|pause|resume|skip|what.*(on|playing|watching))\b/.test(low))) ensure('theater');
   else if (musicAsk(text) || /\b(spotify|radio)\b/.test(low) || (/\b(pause|resume|skip|stop)\b/.test(low) && /\b(music|song|track|playing)\b/.test(low))) ensure('music');
   if (/\b(persona|personality|character prompt)\b/.test(low) && /\b(update|change|edit|rewrite|more |less )\b/.test(low)) ensure('update_persona');
+  // his money: always looked up, never answered from the conversation (2026-11-21)
+  if (/\b(money|finance|finances|balance|balances|budget|spent|spending|bills?|subscriptions?|savings|revolut|bank account|how much (do|have) i)\b/.test(low)) ensure('money');
   if (/\b(posture|zombie|stiff arms|animation|rocketbox|stand (up )?normal|fix (your |her )?pose)\b/.test(low)) ensure('avatar_motion');
   if (/\b(avatar|body|arms)\b/.test(low) && /\b(fix|wrong|broken|weird|pose|motion|move)\b/.test(low)) ensure('avatar_motion');
   // One deliverable per turn, whatever the planner said.
@@ -391,9 +395,14 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
 
   // Working on files takes several steps (look, read, edit, check), so those turns get more rounds.
   const multiStep = plan.tools.some((n) => MULTI_STEP.includes(n));
+  // Lookups she must actually make when the plan picks them: his money and his files. Answering those from the
+  // conversation ("I don't have your balances saved") was wrong once and then repeated (2026-11-21).
+  const LOOKUPS = ['money', 'documents'];
+  const mustCall = !cue && plan.tools.length === 1 && LOOKUPS.includes(plan.tools[0]) ? plan.tools[0] : null;
   const chatOpts = {
     onSentence,
     tools,
+    mustCall,
     runTool: runner,
     maxRounds: multiStep ? 12 : undefined, // undefined: the default (TOOL_ROUNDS, 4)
     repeatable: [...MULTI_STEP, ...ALWAYS],

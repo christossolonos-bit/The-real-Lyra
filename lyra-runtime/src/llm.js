@@ -19,7 +19,8 @@ const LOOKUP_FILLERS = ['Hang on, let me look that up.', 'One sec, checking.', '
 // at most once per reply.
 // free: bookkeeping tools (her notes); a round that only uses those doesn't count against
 // maxRounds, up to two such rounds, so taking a note never costs her the reply.
-export async function chat(messages, { onSentence, tools = [], runTool, maxRounds = MAX_TOOL_ROUNDS, repeatable = [], free = [], voice = false } = {}) {
+// mustCall: a tool the first round has to call (a lookup where answering from memory would be wrong, 2026-11-21).
+export async function chat(messages, { onSentence, tools = [], runTool, maxRounds = MAX_TOOL_ROUNDS, repeatable = [], free = [], voice = false, mustCall = null } = {}) {
   messages = [...messages];
   let full = '';
   let spoke = false;
@@ -33,7 +34,8 @@ export async function chat(messages, { onSentence, tools = [], runTool, maxRound
 
   for (let round = 0; ; round++) {
     const offerTools = tools.length > 0 && paid < maxRounds;
-    const stream = await startChat(messages, offerTools ? tools : null, voice);
+    const force = round === 0 && offerTools && mustCall && tools.some((t) => t.function.name === mustCall) ? mustCall : null;
+    const stream = await startChat(messages, offerTools ? tools : null, voice, force);
 
     let content = '';
     let pending = '';
@@ -102,9 +104,9 @@ export async function chat(messages, { onSentence, tools = [], runTool, maxRound
   }
 }
 
-async function startChat(messages, tools, voice = false) {
-  if (config.brain === 'openrouter') return openRouterChat(messages, tools, voice);
-  if (config.brain === 'nvidia') return nvidiaChat(messages, tools);
+async function startChat(messages, tools, voice = false, force = null) {
+  if (config.brain === 'openrouter') return openRouterChat(messages, tools, voice, force);
+  if (config.brain === 'nvidia') return nvidiaChat(messages, tools, force);
   const request = {
     model: config.ollama.model,
     messages,
@@ -169,7 +171,7 @@ async function* streamOpenAIChat(res, label) {
 }
 
 // NVIDIA NIM chat — Nemotron burns the token budget on reasoning unless enable_thinking is false.
-async function* nvidiaChat(messages, tools) {
+async function* nvidiaChat(messages, tools, force = null) {
   if (!config.nvidia.apiKey) throw new Error('NVIDIA is the teacher, but NVIDIA_API_KEY is empty in .env');
   const body = {
     model: config.nvidia.model,
@@ -181,6 +183,7 @@ async function* nvidiaChat(messages, tools) {
     chat_template_kwargs: { enable_thinking: false },
   };
   if (tools) body.tools = tools;
+  if (tools && force) body.tool_choice = { type: 'function', function: { name: force } };
   const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: nvidiaHeaders(),
@@ -192,7 +195,7 @@ async function* nvidiaChat(messages, tools) {
 
 // Yields the same shape as Ollama's stream ({ message: { content, tool_calls } }) so chat()
 // handles both. Reasoning tokens are dropped: only the answer is spoken.
-async function* openRouterChat(messages, tools, voice = false) {
+async function* openRouterChat(messages, tools, voice = false, force = null) {
   // Spoken replies use their own (default: no) reasoning: on Grok 4.20 medium reasoning alone added
   // about 10 seconds before the first word. Text and tool work keep the main setting.
   const effort = voice ? config.openrouter.voiceReasoning : config.openrouter.reasoning;
@@ -204,6 +207,7 @@ async function* openRouterChat(messages, tools, voice = false) {
     ...(effort === 'none' ? { reasoning: { enabled: false } } : { reasoning: { effort, exclude: true } }),
   };
   if (tools) body.tools = tools;
+  if (tools && force) body.tool_choice = { type: 'function', function: { name: force } };
   const res = await fetch(`${OPENROUTER}/chat/completions`, { method: 'POST', headers: openRouterHeaders(), body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`OpenRouter (${config.openrouter.model}) failed (${res.status}): ${(await res.text()).slice(0, 300)}`);
   yield* streamOpenAIChat(res, 'OpenRouter');
