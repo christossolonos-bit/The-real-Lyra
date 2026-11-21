@@ -1,8 +1,12 @@
 // What Chris sends Lyra on Discord besides words (2026-11-20):
 //  - voice messages: transcribed with her own speech-to-text, then answered as if he'd said it
-//  - photos: looked at with her vision model (the same one as her webcam eyes)
+//  - photos: looked at with her vision model (the same one as her webcam eyes), and kept (Chris's) so she can look
+//    again when he asks about a detail (documents tool, look)
 //  - documents (PDF, Word, PowerPoint, Excel, text, code...): read, kept for follow-up questions
 //    (data/documents, on this PC only; the documents tool reads or searches them later). Owner only.
+//  - PDFs are also kept as page pictures, so she can look at a chart, photo or scanned page (2026-11-21:
+//    "if i give her a pdf or image id like her to be able to see it and understand it"); scanned PDFs with no text
+//    are read by looking at their first pages.
 // Python runs with -P -E: no stray files from the working folder, no environment overrides, but it still finds
 // the packages installed for this user (pypdf), which -I would hide.
 import { spawn, spawnSync } from 'node:child_process';
@@ -22,6 +26,8 @@ const MAX_BYTES = 25 * 1024 * 1024;
 const IN_TURN = 24_000; // characters of a new document she reads straight away (the rest via the documents tool)
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|js|mjs|ts|tsx|jsx|py|html?|css|xml|ya?ml|ini|toml|log|srt|vtt|sql|sh|bat|ps1|java|c|cpp|h|cs|go|rs|rb|php)$/i;
 const DOC_EXT = /\.(pdf|docx|pptx|xlsx)$/i;
+const MAX_PAGES = 60;   // PDF pages kept as pictures
+const READ_SCANNED = 4; // pages of a scanned PDF she reads straight away (the rest on request)
 
 const index = () => { try { return JSON.parse(readFileSync(INDEX, 'utf8')); } catch { return []; } };
 const saveIndex = (x) => { mkdirSync(DOCS, { recursive: true }); writeFileSync(INDEX, JSON.stringify(x, null, 1)); };
@@ -50,17 +56,15 @@ export async function transcribeVoiceMessage(att) {
   return (await transcribeSpeech(pcm)) || '';
 }
 
-// ---------- photos ----------
-async function lookAt(att, question) {
-  const buf = await download(att);
-  const mime = att.contentType?.split(';')[0] || 'image/jpeg';
+// ---------- her eyes on a picture (photo or PDF page) ----------
+async function vision(prompt, buf, mime = 'image/jpeg', maxTokens = 350) {
   const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
-    method: 'POST', signal: AbortSignal.timeout(60_000),
+    method: 'POST', signal: AbortSignal.timeout(90_000),
     headers: { Authorization: `Bearer ${config.nvidia.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: config.nvidia.model, max_tokens: 350, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
+      model: config.nvidia.model, max_tokens: maxTokens, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
       messages: [{ role: 'user', content: [
-        { type: 'text', text: `Chris sent this photo${question ? ` with the message: "${question}"` : ''}. Describe plainly what's in it, read out any text in it, and note anything that matters for his message. 2 to 6 short sentences. Don't guess beyond what's visible.` },
+        { type: 'text', text: prompt },
         { type: 'image_url', image_url: { url: `data:${mime};base64,${buf.toString('base64')}` } },
       ] }],
     }),
@@ -68,31 +72,48 @@ async function lookAt(att, question) {
   if (!res.ok) throw new Error(`vision ${res.status}`);
   return ((await res.json()).choices?.[0]?.message?.content || '').trim();
 }
+const lookAt = (buf, mime, question) => vision(`Chris sent this photo${question ? ` with the message: "${question}"` : ''}. Describe plainly what's in it, read out any text in it, and note anything that matters for his message. 2 to 6 short sentences. Don't guess beyond what's visible.`, buf, mime);
+const IMG_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 
 // ---------- documents ----------
-async function extract(att) {
-  const buf = await download(att);
-  if (TEXT_EXT.test(att.name)) return buf.toString('utf8');
+const py = (args) => {
+  const r = spawnSync(process.env.PYTHON || 'python', ['-P', '-E', path.join(HERE, 'docs_extract.py'), ...args], { encoding: 'utf8', maxBuffer: 1 << 27, timeout: 180_000, windowsHide: true });
+  if (r.status !== 0) throw new Error(String(r.stderr || r.error?.message || 'unreadable').trim().split('\n').at(-1).slice(0, 200));
+  return r.stdout;
+};
+function withTemp(buf, name, fn) {
   const dir = mkdtempSync(path.join(tmpdir(), 'lyra-doc-'));
-  const file = path.join(dir, path.basename(att.name).replace(/[^\w.-]/g, '_'));
+  const file = path.join(dir, path.basename(name).replace(/[^\w.-]/g, '_'));
   writeFileSync(file, buf);
-  try {
-    const r = spawnSync(process.env.PYTHON || 'python', ['-P', '-E', path.join(HERE, 'docs_extract.py'), file], { encoding: 'utf8', maxBuffer: 1 << 27, timeout: 90_000, windowsHide: true });
-    if (r.status !== 0) throw new Error(String(r.stderr || r.error?.message || 'unreadable').trim().split('\n').at(-1).slice(0, 200));
-    return r.stdout;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  try { return fn(file); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
-function keep(att, text, conversation) {
+function extract(buf, name) {
+  if (TEXT_EXT.test(name)) return buf.toString('utf8');
+  return withTemp(buf, name, (file) => py([file]));
+}
+// a PDF's pages as pictures: data/documents/<id>/p1.jpg ... (returns the PDF's page count)
+const renderPages = (buf, name, id) => Number(withTemp(buf, name, (file) => py(['--render', file, path.join(DOCS, String(id)), String(MAX_PAGES)])).trim()) || 0;
+const pagePicture = (id, page) => path.join(DOCS, String(id), `p${page}.jpg`);
+// a page has text if pypdf found more than a few words on it
+const pageTexts = (text) => text.split(/\[page \d+\]\n?/).slice(1);
+const nextId = () => (index().reduce((m, d) => Math.max(m, d.id), 0) || 0) + 1;
+function keep(att, text, conversation, more = {}) {
   const list = index();
-  const id = (list.reduce((m, d) => Math.max(m, d.id), 0) || 0) + 1;
+  const id = more.id || nextId();
   mkdirSync(DOCS, { recursive: true });
   writeFileSync(path.join(DOCS, `${id}.txt`), text);
-  const doc = { id, name: att.name, chars: text.length, words: (text.match(/\S+/g) || []).length, at: Date.now(), when: momentLabel(), conversation };
+  const doc = { id, name: att.name, chars: text.length, words: (text.match(/\S+/g) || []).length, at: Date.now(), when: momentLabel(), conversation, ...more };
   list.push(doc);
   saveIndex(list);
   return doc;
+}
+function update(doc, text) {
+  writeFileSync(path.join(DOCS, `${doc.id}.txt`), text);
+  const list = index();
+  const d = list.find((x) => x.id === doc.id);
+  Object.assign(d, { chars: text.length, words: (text.match(/\S+/g) || []).length });
+  saveIndex(list);
+  return d;
 }
 
 // Everything attached to one message: { said: text to add to what he said, extra: what she reads this turn }
@@ -107,16 +128,54 @@ export async function readAttachments(message, { owner, conversation }) {
         said.push(t || '(a voice message she couldn\'t make out)');
         activity('heard', { voice: true, speaker: message.author.username, text: t, via: 'voice message' });
       } else if (type.startsWith('image/')) {
-        const seen = await lookAt(att, question);
+        const buf = await download(att);
+        const mime = type.split(';')[0] || 'image/jpeg';
+        const seen = await lookAt(buf, mime, question);
         said.push('(sent a photo)');
-        extra.push(`He sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
+        if (owner) {
+          // kept: the picture itself and what she saw (so a search finds it), for questions about it later
+          const id = nextId();
+          const file = `${id}.${IMG_EXT[mime] || 'jpg'}`;
+          mkdirSync(DOCS, { recursive: true });
+          writeFileSync(path.join(DOCS, file), buf);
+          const doc = keep(att, `[photo] What Lyra saw when Chris sent it: ${seen}`, conversation, { id, kind: 'image', file, mime });
+          extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +
+            `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.`);
+        } else {
+          extra.push(`They sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
+        }
       } else if (TEXT_EXT.test(att.name) || DOC_EXT.test(att.name)) {
         if (!owner) { extra.push(`They sent a file ("${att.name}"). You only read files from Chris; say so kindly.`); continue; }
-        const text = (await extract(att)).replace(/\r/g, '').trim();
-        if (!text) { extra.push(`He sent "${att.name}" but there's no readable text in it (it may be scanned images). Tell him.`); continue; }
-        const doc = keep(att, text, conversation);
+        const buf = await download(att);
+        let text = extract(buf, att.name).replace(/\r/g, '').trim();
+        const isPdf = /\.pdf$/i.test(att.name);
+        let doc, pages = 0, looked = 0;
+        if (isPdf) {
+          const id = nextId();
+          try { pages = renderPages(buf, att.name, id); } catch (err) { activity('error', { where: 'attachment', message: `page pictures for ${att.name}: ${err.message}` }); }
+          const words = (text.match(/[\p{L}\p{N}]{2,}/gu) || []).length;
+          doc = keep(att, text, conversation, { id, kind: 'pdf', pages, pictured: Math.min(pages, MAX_PAGES) });
+          // scanned (or nearly no text): she reads the first pages by looking at them
+          if (pages && words < 25 * Math.min(pages, READ_SCANNED)) {
+            const read = [];
+            for (let n = 1; n <= Math.min(pages, READ_SCANNED); n++) {
+              try {
+                read.push(`[page ${n}]\n${await vision('This is a page of a document Chris sent. Write out all the text on it, in reading order, and briefly describe any pictures, charts or tables (with their numbers). Plain text, nothing else.', readFileSync(pagePicture(doc.id, n)), 'image/jpeg', 1500)}`);
+                looked++;
+              } catch {}
+            }
+            if (read.length) { text = read.join('\n\n'); doc = update(doc, text); }
+          }
+        } else if (text) {
+          doc = keep(att, text, conversation);
+        }
+        if (!text) { extra.push(`He sent "${att.name}" but there's no readable text in it. Tell him.`); continue; }
         said.push(`(sent the file "${att.name}")`);
-        extra.push(`Chris sent you a file: "${doc.name}" (about ${doc.words} words). ` +
+        const pictured = isPdf && pages
+          ? ` Its ${pages} page${pages > 1 ? 's are' : ' is'} also kept as pictures${pages > MAX_PAGES ? ` (the first ${MAX_PAGES})` : ''}: for a chart, photo, diagram, table layout or anything the text below doesn't show, look at the page with your documents tool (look, id ${doc.id}, page, his question).` +
+            (looked ? ` It's a scanned PDF: you read its first ${looked} page${looked > 1 ? 's' : ''} by looking${pages > looked ? '; look at later pages when he asks about them' : ''}.` : '')
+          : '';
+        extra.push(`Chris sent you a file: "${doc.name}" (about ${doc.words} words).${pictured} ` +
           `${question ? 'Answer what he asked about it.' : "He didn't ask anything specific: tell him briefly what it's about and what stands out."} ` +
           `It's saved as document #${doc.id}; later you can read more or search it with your documents tool. Its text:\n<<<\n${text.slice(0, IN_TURN)}\n>>>` +
           (text.length > IN_TURN ? `\n(That's the first ${IN_TURN} characters of ${text.length}; use the documents tool for the rest.)` : ''));
@@ -139,10 +198,11 @@ export function recentDocumentsLine(limit = 5) {
 }
 
 // ---------- the documents tool ----------
-function documentsTool({ action, id = 0, name = '', query = '', part = 0 }) {
+async function documentsTool({ action, id = 0, name = '', query = '', part = 0, page = 1, question = '' }) {
   const list = index();
   if (action === 'search') return searchDocuments({ id, name, query });
-  if (action === 'list') return list.length ? list.slice(-20).map((d) => `#${d.id} "${d.name}" ${d.words} words (${d.when})`).join('\n') : 'No files yet.';
+  if (action === 'look') return lookAgain(list, { id, name, page, question: question || query });
+  if (action === 'list') return list.length ? list.slice(-20).map((d) => `#${d.id} "${d.name}" ${d.kind === 'image' ? 'photo' : `${d.words} words${d.pages ? `, ${d.pages} pages` : ''}`} (${d.when})`).join('\n') : 'No files yet.';
   const doc = list.find((d) => d.id === Number(id)) || (name && [...list].reverse().find((d) => d.name.toLowerCase().includes(String(name).toLowerCase()))) || list.at(-1);
   if (!doc) return 'Error: no such file. Use list.';
   const text = readFileSync(path.join(DOCS, `${doc.id}.txt`), 'utf8');
@@ -150,7 +210,28 @@ function documentsTool({ action, id = 0, name = '', query = '', part = 0 }) {
     const size = 20_000, n = Math.max(0, Number(part) || 0), parts = Math.ceil(text.length / size);
     return `"${doc.name}" part ${n + 1} of ${parts}:\n${text.slice(n * size, (n + 1) * size)}`;
   }
-  return 'Error: action must be list, read or search.';
+  return 'Error: action must be list, read, search or look.';
+}
+
+// Look at a kept photo or a PDF page again, with his question in mind
+async function lookAgain(list, { id, name, page, question }) {
+  const doc = list.find((d) => d.id === Number(id)) || (name && [...list].reverse().find((d) => d.name.toLowerCase().includes(String(name).toLowerCase())))
+    || [...list].reverse().find((d) => d.kind === 'image' || d.kind === 'pdf');
+  if (!doc) return 'Error: no photo or PDF to look at. Use list.';
+  let file, mime = 'image/jpeg', what;
+  if (doc.kind === 'image') {
+    file = path.join(DOCS, doc.file); mime = doc.mime || mime; what = `the photo "${doc.name}"`;
+  } else if (doc.kind === 'pdf') {
+    const n = Math.max(1, Math.round(Number(page) || 1));
+    if (n > (doc.pages || 0)) return `Error: "${doc.name}" has ${doc.pages || 0} pages.`;
+    if (n > (doc.pictured || 0)) return `Error: only the first ${doc.pictured} pages of "${doc.name}" were kept as pictures; read its text instead.`;
+    file = pagePicture(doc.id, n); what = `page ${n} of "${doc.name}"`;
+  } else {
+    return `Error: "${doc.name}" is a text file with no pictures; use read or search.`;
+  }
+  if (!existsSync(file)) return `Error: the picture of ${what} isn't on this PC any more.`;
+  const seen = await vision(`Chris is asking about ${what}${question ? `: "${question}"` : ''}. Look carefully and answer from what's actually visible: read exact numbers, labels and text where they matter. If it isn't visible, say so. Plain, short answer.`, readFileSync(file), mime, 600);
+  return `Looking at ${what}: ${seen}`;
 }
 
 // Search: in the file he named, or across all his files when he didn't (newest first).
@@ -187,10 +268,10 @@ export const DOCUMENT_TOOLS = {
     enabled: (ctx) => Boolean(ctx?.perms?.owner),
     definition: { type: 'function', function: {
       name: 'documents',
-      description: "Files Chris has sent you (PDFs, Word, slides, spreadsheets, text, code). list = what you have; read = a file's text, 20,000 characters per part (id or name, part 0, 1, 2...); search = the passages that match his question, across all his files unless he means a particular one (then id or name). read defaults to the latest file. Answer from what it actually says; quote briefly when it helps.",
+      description: "Files and photos Chris has sent you (PDFs, Word, slides, spreadsheets, text, code, photos). list = what you have; read = a file's text, 20,000 characters per part (id or name, part 0, 1, 2...); search = the passages that match his question, across all his files unless he means a particular one (then id or name); look = see a kept photo or a PDF page with your own eyes and answer his question about it (id or name, page for PDFs, question): use it for charts, pictures, diagrams, layouts, scanned pages, or a detail in a photo you didn't mention. read defaults to the latest file. Answer from what it actually says or shows; quote briefly when it helps.",
       parameters: { type: 'object', properties: {
-        action: { type: 'string', enum: ['list', 'read', 'search'] }, id: { type: 'number' }, name: { type: 'string' },
-        query: { type: 'string' }, part: { type: 'number' },
+        action: { type: 'string', enum: ['list', 'read', 'search', 'look'] }, id: { type: 'number' }, name: { type: 'string' },
+        query: { type: 'string' }, part: { type: 'number' }, page: { type: 'number' }, question: { type: 'string' },
       }, required: ['action'] },
     } },
     run: documentsTool,

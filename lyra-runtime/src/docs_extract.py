@@ -1,6 +1,8 @@
 # Text out of a document Chris sends Lyra (lyra-runtime/src/attachments.js runs this with python -P -E).
 # usage: python -P -E docs_extract.py <file>   ->   the text on stdout (UTF-8)
 # PDF via pypdf; Word / PowerPoint / Excel by reading the XML inside the file (no extra packages).
+# python -P -E docs_extract.py --render <file.pdf> <folder> <max pages>   ->   page images p1.jpg, p2.jpg... (pypdfium2),
+# so she can look at a page (charts, photos, scanned pages); prints the page count
 import re, sys, zipfile, html
 
 def xml_text(xml):
@@ -38,6 +40,21 @@ def main(path):
     with open(path, "rb") as f:
         return f.read().decode("utf8", "ignore")
 
+def render(path, folder, most):
+    import os
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(path)
+    os.makedirs(folder, exist_ok=True)
+    for i in range(min(len(pdf), most)):
+        page = pdf[i]
+        w = page.get_width()
+        img = page.render(scale=max(1.0, min(2.5, 1400 / max(w, 1)))).to_pil().convert("RGB")
+        img.save(os.path.join(folder, f"p{i + 1}.jpg"), quality=82)
+    return len(pdf)
+
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
-    print(main(sys.argv[1]))
+    if sys.argv[1] == "--render":
+        print(render(sys.argv[2], sys.argv[3], int(sys.argv[4])))
+    else:
+        print(main(sys.argv[1]))
