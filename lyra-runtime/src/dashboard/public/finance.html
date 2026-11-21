@@ -56,6 +56,9 @@
   .budgets input { width:90px; text-align:right; }
   .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
   .msg.show { opacity:1; }
+  h3.sub { margin:16px 0 8px; font-size:13px; color:var(--muted); font-weight:600; }
+  .kind { font-size:12px; color:var(--muted); }
+  .in { color:var(--good); }
   .src { font-size:11px; color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:0 5px; }
   @media (max-width:640px) { .cat { grid-template-columns:96px 1fr; } .cat .val { grid-column:1 / -1; } header select { margin-left:0; } }
 </style>
@@ -69,6 +72,33 @@
 <main>
   <section class="card">
     <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="card">
+    <h2>Accounts</h2>
+    <div class="scroll"><table id="accounts"></table></div>
+    <form class="add" id="addAccount" style="margin-top:12px">
+      <input name="name" placeholder="New account (e.g. Revolut)" required aria-label="Account name">
+      <select name="kind" aria-label="Type"></select>
+      <input name="amount" type="number" step="0.01" placeholder="€ now" required aria-label="Balance now">
+      <button>Add account</button>
+    </form>
+    <h3 class="sub">Money in / moving money</h3>
+    <form class="add" id="addIncome">
+      <input name="amount" type="number" step="0.01" min="0.01" placeholder="€" required aria-label="Amount received">
+      <select name="account" aria-label="Into account"></select>
+      <input name="note" placeholder="Salary, refund..." aria-label="What it was">
+      <input name="date" type="date" aria-label="Date">
+      <button class="primary">Money in</button>
+    </form>
+    <form class="add" id="addTransfer">
+      <input name="amount" type="number" step="0.01" min="0.01" placeholder="€" required aria-label="Amount to move">
+      <select name="from" aria-label="From account"></select>
+      <span class="muted">→</span>
+      <select name="to" aria-label="To account"></select>
+      <button>Move</button>
+    </form>
+    <div class="scroll"><table id="moves"></table></div>
   </section>
 
   <section class="card">
@@ -88,6 +118,7 @@
       <select name="category" aria-label="Category"></select>
       <input name="note" placeholder="What was it?" aria-label="Note">
       <input name="date" type="date" aria-label="Date">
+      <select name="account" aria-label="Paid from"></select>
       <button class="primary">Add</button>
     </form>
     <div class="scroll"><table id="expenses"></table></div>
@@ -128,6 +159,8 @@ async function api(method, url, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
+const accOptions = (sel, none) => (none ? `<option value="none"${sel ? '' : ' selected'}>—</option>` : '') + data.accounts.map((a) => `<option value="${a.id}"${a.id === sel ? ' selected' : ''}>${esc(a.name)}</option>`).join('');
+const spendingId = () => data.accounts.find((a) => a.kind === 'spending')?.id ?? null;
 const catOptions = (sel) => [...new Set([...data.categories, ...Object.keys(data.byCategory)])].map((c) => `<option${c === sel ? ' selected' : ''}>${esc(c)}</option>`).join('');
 
 async function load() {
@@ -143,12 +176,35 @@ function render() {
   const diff = d.total - d.lastMonth;
   const perMonth = d.bills.reduce((s, b) => s + (b.every === 'week' ? b.amount * 52 / 12 : b.amount / ({ month: 1, '2 months': 2, '3 months': 3, '6 months': 6, year: 12 }[b.every] || 1)), 0);
   const tb = d.budgets.total;
+  const have = d.accounts.reduce((s, a) => s + a.balance, 0);
   $('#tiles').innerHTML = [
+    ...(d.accounts.length ? [[eur(have), `in your ${d.accounts.length} accounts`]] : []),
     [eur(d.total), `spent in ${esc(d.monthName)}`],
     [d.lastMonth ? `<span class="${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '+' : '−'}${eur(Math.abs(diff))}</span>` : '—', d.lastMonth ? `vs last month (${eur(d.lastMonth)})` : 'nothing last month'],
     [tb ? `<span class="${d.total > tb ? 'up' : ''}">${eur(tb - d.total)}</span>` : '—', tb ? `left of the ${eur(tb)} budget` : 'no total budget set'],
     [eur(perMonth), `bills a month (${d.bills.length})`],
   ].map(([v, l]) => `<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
+  // accounts
+  $('#accounts').innerHTML = d.accounts.length ? '<tr><th>Account</th><th>Type</th><th class="num">Now</th><th></th></tr>' + d.accounts.map((a) => {
+    if (editing?.kind === 'account' && editing.id === a.id) {
+      return `<tr data-id="${a.id}"><td><input name="name" value="${esc(a.name)}"></td><td><select name="kind">${d.kinds.map((k) => `<option${k === a.kind ? ' selected' : ''}>${k}</option>`).join('')}</select></td>` +
+        `<td class="num"><input type="number" step="0.01" name="amount" value="${a.balance}"></td>` +
+        `<td class="num"><button class="link" data-act="save-account">Save</button><button class="link" data-act="cancel">Cancel</button></td></tr>`;
+    }
+    return `<tr data-id="${a.id}"><td>${esc(a.name)}</td><td class="kind">${esc(a.kind)}${a.kind !== 'spending' ? ` · set ${esc(new Date(a.date + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}` : ''}</td>` +
+      `<td class="num"><b>${eur(a.balance)}</b></td><td class="num"><button class="link" data-act="edit-account">Set balance</button><button class="link danger" data-act="delete-account">Remove</button></td></tr>`;
+  }).join('') : '<tr><td class="empty">No accounts yet. Add them below, or tell Lyra ("I have €500 in the bank").</td></tr>';
+  const fa = $('#addAccount'); fa.kind.innerHTML = d.kinds.map((k) => `<option>${k}</option>`).join('');
+  $('#addIncome').account.innerHTML = accOptions(spendingId());
+  if (!$('#addIncome').date.value) $('#addIncome').date.value = todayStr();
+  $('#addTransfer').from.innerHTML = accOptions(spendingId());
+  $('#addTransfer').to.innerHTML = accOptions(d.accounts.find((a) => a.kind === 'savings')?.id);
+  for (const id of ['#addIncome', '#addTransfer']) $(id).hidden = !d.accounts.length;
+  const moves = [
+    ...d.income.map((i) => ({ date: i.date, html: `<td class="num in">+${eur(i.amount)}</td><td>${esc(i.note || 'money in')} → ${esc(i.accountName)}</td>`, kind: 'income', id: i.id })),
+    ...d.transfers.map((t) => ({ date: t.date, html: `<td class="num">${eur(t.amount)}</td><td>${esc(t.fromName)} → ${esc(t.toName)}</td>`, kind: 'transfer', id: t.id })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+  $('#moves').innerHTML = moves.map((m) => `<tr data-id="${m.id}" data-kind="${m.kind}"><td>${esc(new Date(m.date + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</td>${m.html}<td class="num"><button class="link danger" data-act="delete-move">Delete</button></td></tr>`).join('');
   // categories
   const cats = Object.entries(d.byCategory).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...cats.map(([c, v]) => Math.max(v, d.budgets[c] || 0)));
@@ -163,15 +219,19 @@ function render() {
   $('#hist').innerHTML = d.history.map((h) => `<div class="${h.month === d.month ? 'now' : ''}"><b>${h.total ? eur(h.total) : ''}</b><i style="height:${h.total / hmax * 80}%"></i><small>${esc(new Date(h.month + '-15T12:00').toLocaleString('en-GB', { month: 'short' }))}</small></div>`).join('');
   // expenses
   $('#addExpense').category.innerHTML = catOptions('groceries');
+  $('#addExpense').account.innerHTML = accOptions(spendingId(), true);
+  $('#addExpense').account.hidden = !d.accounts.length;
   if (!$('#addExpense').date.value) $('#addExpense').date.value = d.month === todayStr().slice(0, 7) ? todayStr() : d.month + '-01';
-  $('#expenses').innerHTML = d.expenses.length ? '<tr><th>Date</th><th class="num">Amount</th><th>Category</th><th>Note</th><th></th></tr>' + d.expenses.map((e) => {
+  $('#expenses').innerHTML = d.expenses.length ? `<tr><th>Date</th><th class="num">Amount</th><th>Category</th><th>Note</th>${d.accounts.length ? '<th>From</th>' : ''}<th></th></tr>` + d.expenses.map((e) => {
     if (editing?.kind === 'expense' && editing.id === e.id) {
       return `<tr data-id="${e.id}"><td><input type="date" name="date" value="${e.date}"></td><td class="num"><input type="number" step="0.01" min="0.01" name="amount" value="${e.amount}"></td>` +
         `<td><select name="category">${catOptions(e.category)}</select></td><td><input name="note" value="${esc(e.note)}"></td>` +
+        (d.accounts.length ? `<td><select name="account">${accOptions(e.account, true)}</select></td>` : '') +
         `<td class="num"><button class="link" data-act="save-expense">Save</button><button class="link" data-act="cancel">Cancel</button></td></tr>`;
     }
     return `<tr data-id="${e.id}"><td>${esc(new Date(e.date + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</td><td class="num">${eur(e.amount)}</td><td>${esc(e.category)}</td>` +
       `<td>${esc(e.note)} ${e.source && e.source !== 'chat' && e.source !== 'page' ? `<span class="src">${esc(e.source)}</span>` : ''}</td>` +
+      (d.accounts.length ? `<td class="kind">${esc(d.accounts.find((a) => a.id === e.account)?.name || '')}</td>` : '') +
       `<td class="num"><button class="link" data-act="edit-expense">Edit</button><button class="link danger" data-act="delete-expense">Delete</button></td></tr>`;
   }).join('') : '<tr><td class="empty">No spending logged this month.</td></tr>';
   // bills
@@ -206,6 +266,16 @@ document.addEventListener('click', async (ev) => {
   try {
     if (act === 'edit-expense') { editing = { kind: 'expense', id }; render(); }
     else if (act === 'edit-bill') { editing = { kind: 'bill', id }; render(); }
+    else if (act === 'edit-account') { editing = { kind: 'account', id }; render(); }
+    else if (act === 'save-account') { const r = await api('PUT', `/api/finance/account/${id}`, rowValues(tr)); editing = null; toast(r.message.split('. Accounts:')[0]); await load(); }
+    else if (act === 'delete-account') {
+      const a = data.accounts.find((x) => x.id === id);
+      if (!confirm(`Remove ${a.name} (${eur(a.balance)}) from your accounts? Past spending stays logged.`)) return;
+      toast((await api('DELETE', `/api/finance/account/${id}`)).message); await load();
+    } else if (act === 'delete-move') {
+      if (!confirm('Delete this entry?')) return;
+      toast((await api('DELETE', `/api/finance/${tr.dataset.kind}/${id}`)).message); await load();
+    }
     else if (act === 'cancel') { editing = null; render(); }
     else if (act === 'save-expense' || act === 'save-bill') {
       const kind = act === 'save-expense' ? 'expense' : 'bill';
@@ -227,7 +297,7 @@ $('#addExpense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = ev.target;
   try {
-    const r = await api('POST', '/api/finance/expense', { amount: Number(f.amount.value), category: f.category.value, note: f.note.value, date: f.date.value });
+    const r = await api('POST', '/api/finance/expense', { amount: Number(f.amount.value), category: f.category.value, note: f.note.value, date: f.date.value, ...(data.accounts.length ? { account: f.account.value } : {}) });
     toast(r.message); f.amount.value = ''; f.note.value = '';
     month = f.date.value.slice(0, 7); await load(); f.amount.focus();
   } catch (err) { toast(err.message); }
@@ -240,6 +310,15 @@ $('#addBill').addEventListener('submit', async (ev) => {
     toast(r.message); f.reset(); await load();
   } catch (err) { toast(err.message); }
 });
+const formSubmit = (sel, url, body, after) => $(sel).addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  try { const r = await api('POST', url, body(f)); toast(r.message.split('. Accounts:')[0]); f.reset(); await load(); }
+  catch (err) { toast(err.message); }
+});
+formSubmit('#addAccount', '/api/finance/account', (f) => ({ name: f.name.value, kind: f.kind.value, amount: Number(f.amount.value) }));
+formSubmit('#addIncome', '/api/finance/income', (f) => ({ amount: Number(f.amount.value), account: f.account.value, note: f.note.value, date: f.date.value }));
+formSubmit('#addTransfer', '/api/finance/transfer', (f) => ({ amount: Number(f.amount.value), from: f.from.value, to: f.to.value }));
 $('#budgets').addEventListener('change', async (ev) => {
   const i = ev.target.closest('input[data-budget]');
   if (!i) return;

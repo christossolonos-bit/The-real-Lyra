@@ -8,6 +8,10 @@
 //    on the day (unless he set it to "ask"), then moved to the next due date
 //  - budget warnings at 80% and 100% of a category's monthly budget (or the total)
 //  - a short summary of last month on the 1st, in a DM
+//  - accounts (2026-11-21):
+//    a balance he gives her, then his spending comes off his spending account (Bank, unless he says otherwise),
+//    money in goes onto it, moving money between accounts moves it; savings and investing keep the value he gives
+//    until he tells her a new one (she doesn't track markets or advise on them)
 //  - the dashboard's Finance page reads and edits the same file (financeView, financeEdit)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -19,8 +23,9 @@ export const CATEGORIES = ['groceries', 'eating out', 'fuel', 'transport', 'bill
 const EVERY = { week: [0, 7], month: [1, 0], '2 months': [2, 0], '3 months': [3, 0], '6 months': [6, 0], year: [12, 0] };
 
 function load() {
-  try { return { expenses: [], bills: [], budgets: {}, warned: {}, summarized: '', ...JSON.parse(readFileSync(FILE, 'utf8')) }; }
-  catch { return { expenses: [], bills: [], budgets: {}, warned: {}, summarized: '' }; }
+  const blank = { expenses: [], bills: [], budgets: {}, warned: {}, summarized: '', accounts: [], income: [], transfers: [] };
+  try { return { ...blank, ...JSON.parse(readFileSync(FILE, 'utf8')) }; }
+  catch { return blank; }
 }
 function save(d) { mkdirSync(DATA_DIR, { recursive: true }); writeFileSync(FILE, JSON.stringify(d, null, 1)); }
 const nextId = (list) => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
@@ -54,6 +59,33 @@ function addPeriod(date, every) {
 
 // a bill's cost per month (weekly ones: 52 a year)
 const perMonth = (b) => (b.every === 'week' ? b.amount * 52 / 12 : b.amount / EVERY[b.every][0]);
+
+// ---------- accounts ----------
+const KINDS = ['spending', 'savings', 'investing'];
+const kindOf = (name, kind) => (KINDS.includes(kind) ? kind : /sav/i.test(name) ? 'savings' : /invest|stock|crypto|shares|etf/i.test(name) ? 'investing' : 'spending');
+const open = (d) => d.accounts.filter((a) => a.active !== false);
+function findAccount(d, x) {
+  if (x === undefined || x === null || x === '') return null;
+  const t = String(x).trim().toLowerCase();
+  return open(d).find((a) => a.id === Number(x)) || open(d).find((a) => a.name.toLowerCase() === t) || open(d).find((a) => a.name.toLowerCase().includes(t)) || null;
+}
+const spendingAccount = (d) => open(d).find((a) => a.kind === 'spending') || null;
+// the balance he gave, then everything recorded after it
+export function balanceOf(d, a) {
+  let b = a.balance;
+  const after = (x) => (x.at || 0) >= a.asOf; // >=: something logged in the same millisecond still counts
+  for (const e of d.expenses) if (e.account === a.id && after(e)) b -= e.amount;
+  for (const i of d.income) if (i.account === a.id && after(i)) b += i.amount;
+  for (const t of d.transfers) if (after(t)) { if (t.from === a.id) b -= t.amount; if (t.to === a.id) b += t.amount; }
+  return Math.round(b * 100) / 100;
+}
+const accountsLine = (d) => {
+  const list = open(d);
+  if (!list.length) return '';
+  const total = list.reduce((s, a) => s + balanceOf(d, a), 0);
+  return `${list.map((a) => `${a.name} ${eur(balanceOf(d, a))}`).join(', ')} (${eur(total)} in all)`;
+};
+const accountName = (d, id) => d.accounts.find((a) => a.id === id)?.name || '';
 
 // ---------- totals ----------
 function totals(d, month) {
@@ -95,7 +127,9 @@ export function summaryText(month = monthOf(today())) {
   if (!cats.length) return `Nothing logged for ${monthName(month)}.`;
   const lines = cats.map(([c, v]) => `${c} ${eur(v)}${d.budgets[c] ? ` of ${eur(d.budgets[c])}` : ''}`);
   const left = d.budgets.total ? ` Budget: ${eur(d.budgets.total)} (${eur(d.budgets.total - total)} left).` : '';
-  return `${monthName(month)}: ${eur(total)} spent${last ? ` (last month ${eur(last)})` : ''}.${left} By category: ${lines.join('; ')}.`;
+  const income = d.income.filter((i) => monthOf(i.date) === month).reduce((s, i) => s + i.amount, 0);
+  const accounts = accountsLine(d);
+  return `${monthName(month)}: ${eur(total)} spent${last ? ` (last month ${eur(last)})` : ''}${income ? `, ${eur(income)} came in` : ''}.${left} By category: ${lines.join('; ')}.${accounts ? ` Accounts now: ${accounts}.` : ''}`;
 }
 
 // ---------- the tool ----------
@@ -107,20 +141,26 @@ function moneyTool(a) {
     if (!(amount > 0)) return 'Error: amount must be a positive number of euros.';
     const date = a.date ? String(a.date).slice(0, 10) : today();
     if (!isDate(date)) return 'Error: date must be YYYY-MM-DD (Cyprus date), or leave it out for today.';
-    const e = { id: nextId(d.expenses), amount, category: category(a.category), note: String(a.note || '').trim().slice(0, 200), date, at: Date.now(), source: a.source === 'receipt' ? 'receipt' : 'chat' };
+    const none = a.account === 'none'; // the page's "—": not from any account
+    const acc = none ? null : a.account ? findAccount(d, a.account) : spendingAccount(d);
+    if (a.account && !none && !acc) return `Error: no account called "${a.account}". Use accounts to see them.`;
+    const e = { id: nextId(d.expenses), amount, category: category(a.category), note: String(a.note || '').trim().slice(0, 200), date, at: Date.now(), source: a.source === 'receipt' ? 'receipt' : 'chat', account: acc?.id ?? null };
     d.expenses.push(e);
     const warn = warnings(d, monthOf(date));
     save(d);
+    const left = acc ? ` ${acc.name} now ${eur(balanceOf(d, acc))}.` : '';
     activity('finance', { message: `Logged ${eur(amount)} ${e.category}${e.note ? ` (${e.note})` : ''}` });
     const { by } = totals(d, monthOf(date));
-    return `Logged #${e.id}: ${eur(amount)} on ${e.category}${e.note ? `, ${e.note}` : ''}, ${date}. ${e.category} this month: ${eur(by[e.category])}${d.budgets[e.category] ? ` of ${eur(d.budgets[e.category])}` : ''}.` +
+    return `Logged #${e.id}: ${eur(amount)} on ${e.category}${e.note ? `, ${e.note}` : ''}, ${date}${acc ? `, from ${acc.name}` : ''}. ${e.category} this month: ${eur(by[e.category])}${d.budgets[e.category] ? ` of ${eur(d.budgets[e.category])}` : ''}.${left}` +
       (warn.length ? ` Tell him: ${warn.join(' ')}` : '') + ' Confirm briefly.';
   }
   if (act === 'list') {
     const month = /^\d{4}-\d{2}$/.test(a.month || '') ? a.month : monthOf(today());
     const cat = a.category ? category(a.category) : '';
     const rows = d.expenses.filter((e) => monthOf(e.date) === month && (!cat || e.category === cat)).sort((x, y) => y.date.localeCompare(x.date) || y.id - x.id);
-    return rows.length ? `${monthName(month)}${cat ? `, ${cat}` : ''}:\n` + rows.slice(0, 40).map((e) => `#${e.id} ${e.date} ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''}`).join('\n') : `Nothing logged for ${monthName(month)}${cat ? ` in ${cat}` : ''}.`;
+    const ins = cat ? [] : d.income.filter((i) => monthOf(i.date) === month);
+    const out = rows.length ? `${monthName(month)}${cat ? `, ${cat}` : ''}:\n` + rows.slice(0, 40).map((e) => `#${e.id} ${e.date} ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''}`).join('\n') : `Nothing logged for ${monthName(month)}${cat ? ` in ${cat}` : ''}.`;
+    return out + (ins.length ? `\nMoney in: ${ins.map((i) => `${i.date} ${eur(i.amount)}${i.note ? ` (${i.note})` : ''}`).join('; ')}` : '');
   }
   if (act === 'edit' || act === 'delete') {
     const e = d.expenses.find((x) => x.id === Number(a.id)) || (!a.id && d.expenses.at(-1));
@@ -134,8 +174,79 @@ function moneyTool(a) {
     if (a.category) e.category = category(a.category);
     if (a.note !== undefined) e.note = String(a.note).slice(0, 200);
     if (a.date) { if (!isDate(a.date)) return 'Error: date must be YYYY-MM-DD.'; e.date = a.date; }
+    if (a.account !== undefined) {
+      if (a.account === '' || a.account === 0 || a.account === 'none') e.account = null;
+      else { const acc = findAccount(d, a.account); if (!acc) return `Error: no account "${a.account}".`; e.account = acc.id; }
+    }
     save(d);
-    return `Updated #${e.id}: ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''}, ${e.date}.`;
+    return `Updated #${e.id}: ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''}, ${e.date}${e.account ? `, from ${accountName(d, e.account)}` : ''}.`;
+  }
+  if (act === 'account_set') {
+    const amount = money(a.amount);
+    if (!Number.isFinite(amount)) return 'Error: amount = what is in the account now, in euros.';
+    let acc = a.id ? d.accounts.find((x) => x.id === Number(a.id) && x.active !== false) : findAccount(d, a.name);
+    if (a.id && !acc) return 'Error: no such account.';
+    if (!acc) {
+      const name = String(a.name || '').trim().slice(0, 60);
+      if (!name) return 'Error: name the account (Bank, Revolut Savings...).';
+      acc = { id: nextId(d.accounts), name, kind: kindOf(name, a.kind), balance: amount, asOf: Date.now(), date: today(), active: true };
+      d.accounts.push(acc);
+      save(d);
+      return `Added ${acc.name} (${acc.kind}) with ${eur(amount)}.${acc.kind === 'spending' && spendingAccount(d) === acc ? ' His spending comes off this one unless he says otherwise.' : ''} Accounts: ${accountsLine(d)}.`;
+    }
+    if (a.id && a.name) acc.name = String(a.name).trim().slice(0, 60);
+    if (a.kind && KINDS.includes(a.kind)) acc.kind = a.kind;
+    acc.balance = amount;
+    acc.asOf = Date.now();
+    acc.date = today();
+    save(d);
+    return `${acc.name} set to ${eur(amount)}. Accounts: ${accountsLine(d)}.`;
+  }
+  if (act === 'accounts') {
+    const list = open(d);
+    return list.length ? list.map((a) => `${a.name} (${a.kind}): ${eur(balanceOf(d, a))}${a.kind !== 'spending' ? ` (as he last told you, ${a.date})` : ''}`).join('\n') + `\nIn all: ${eur(list.reduce((s, a) => s + balanceOf(d, a), 0))}.` : 'No accounts yet. Ask him what he has (account_set).';
+  }
+  if (act === 'account_remove') {
+    const acc = a.id ? d.accounts.find((x) => x.id === Number(a.id) && x.active !== false) : findAccount(d, a.name);
+    if (!acc) return 'Error: no such account.';
+    acc.active = false;
+    save(d);
+    return `Removed ${acc.name} from the accounts (its past spending stays logged).`;
+  }
+  if (act === 'income') {
+    const amount = money(a.amount);
+    if (!(amount > 0)) return 'Error: amount must be positive.';
+    const acc = a.account ? findAccount(d, a.account) : spendingAccount(d);
+    if (!acc) return a.account ? `Error: no account called "${a.account}".` : 'Error: set up his accounts first (account_set).';
+    const date = a.date && isDate(a.date) ? a.date : today();
+    const i = { id: nextId(d.income), amount, account: acc.id, note: String(a.note || '').trim().slice(0, 200), date, at: Date.now() };
+    d.income.push(i);
+    save(d);
+    return `Money in #${i.id}: ${eur(amount)}${i.note ? ` (${i.note})` : ''} to ${acc.name}, now ${eur(balanceOf(d, acc))}.`;
+  }
+  if (act === 'income_delete') {
+    const i = d.income.find((x) => x.id === Number(a.id));
+    if (!i) return 'Error: no such money-in entry.';
+    d.income = d.income.filter((x) => x !== i);
+    save(d);
+    return `Deleted money in #${i.id}: ${eur(i.amount)}${i.note ? ` (${i.note})` : ''}.`;
+  }
+  if (act === 'transfer') {
+    const amount = money(a.amount);
+    if (!(amount > 0)) return 'Error: amount must be positive.';
+    const from = findAccount(d, a.from), to = findAccount(d, a.to);
+    if (!from || !to || from === to) return 'Error: from and to must be two of his accounts (accounts lists them).';
+    const t = { id: nextId(d.transfers), amount, from: from.id, to: to.id, note: String(a.note || '').trim().slice(0, 200), date: today(), at: Date.now() };
+    d.transfers.push(t);
+    save(d);
+    return `Moved ${eur(amount)} from ${from.name} (now ${eur(balanceOf(d, from))}) to ${to.name} (now ${eur(balanceOf(d, to))}).`;
+  }
+  if (act === 'transfer_delete') {
+    const t = d.transfers.find((x) => x.id === Number(a.id));
+    if (!t) return 'Error: no such transfer.';
+    d.transfers = d.transfers.filter((x) => x !== t);
+    save(d);
+    return `Undid the move of ${eur(t.amount)} from ${accountName(d, t.from)} to ${accountName(d, t.to)}.`;
   }
   if (act === 'summary') return summaryText(/^\d{4}-\d{2}$/.test(a.month || '') ? a.month : monthOf(today())) +
     ' Say it conversationally, point out what stands out (biggest category, changes from last month, budgets close to the limit).';
@@ -174,7 +285,7 @@ function moneyTool(a) {
     if (act === 'bill_paid') {
       const amount = a.amount !== undefined ? money(a.amount) : b.amount;
       if (!(amount > 0)) return 'Error: amount must be positive.';
-      const e = { id: nextId(d.expenses), amount, category: b.category, note: b.name, date: a.date && isDate(a.date) ? a.date : today(), at: Date.now(), source: 'bill', bill: b.id };
+      const e = { id: nextId(d.expenses), amount, category: b.category, note: b.name, date: a.date && isDate(a.date) ? a.date : today(), at: Date.now(), source: 'bill', bill: b.id, account: spendingAccount(d)?.id ?? null };
       d.expenses.push(e);
       if (b.waiting) delete b.waiting; else b.nextDue = addPeriod(b.nextDue, b.every);
       const warn = warnings(d, monthOf(e.date));
@@ -204,9 +315,14 @@ export const FINANCE_TOOLS = {
         'summary = a month\'s totals by category vs budgets and last month. budget = set a monthly budget (category or "total", amount; 0 removes). ' +
         'bill_add = a subscription or recurring bill (name, amount, every: week / month / 2 months / 3 months / 6 months / year, next_due YYYY-MM-DD, category, log "auto" to log it on the day or "ask" for bills that vary). ' +
         'bills = list them. bill_edit / bill_cancel = by id or name. bill_paid = log a bill now (amount if it differed). ' +
+        "Accounts: account_set = what's in an account now (name, amount, kind spending / savings / investing; new name = new account); accounts = balances; account_remove. " +
+        "Spending comes off his spending account (Bank) unless he names another (account). income = money he received (amount, note, account; default his spending account). " +
+        "transfer = he moved money between his accounts (from, to, amount). Savings and investing keep the value he last gave you: when he tells you a new value, account_set it. " +
+        "You don't track markets or give investment advice. " +
         "Log only what he actually tells you he spent; if a receipt or amount is unclear, ask before logging. Pass any budget warning on to him.",
       parameters: { type: 'object', properties: {
-        action: { type: 'string', enum: ['spend', 'list', 'edit', 'delete', 'summary', 'budget', 'bill_add', 'bills', 'bill_edit', 'bill_cancel', 'bill_paid'] },
+        action: { type: 'string', enum: ['spend', 'list', 'edit', 'delete', 'summary', 'budget', 'bill_add', 'bills', 'bill_edit', 'bill_cancel', 'bill_paid', 'account_set', 'accounts', 'account_remove', 'income', 'transfer'] },
+        account: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, kind: { type: 'string', enum: KINDS },
         amount: { type: 'number' }, category: { type: 'string' }, note: { type: 'string' }, date: { type: 'string' }, month: { type: 'string' },
         id: { type: 'number' }, name: { type: 'string' }, every: { type: 'string', enum: Object.keys(EVERY) }, next_due: { type: 'string' },
         log: { type: 'string', enum: ['auto', 'ask'] }, source: { type: 'string', enum: ['chat', 'receipt'] },
@@ -237,7 +353,7 @@ export function startFinance({ remind, dm }) {
       // on the day: logged as spent (or he's asked, for bills that vary), and moved to the next date
       if (t >= b.nextDue && !b.waiting) {
         if (b.log === 'auto') {
-          d.expenses.push({ id: nextId(d.expenses), amount: b.amount, category: b.category, note: b.name, date: b.nextDue, at: Date.now(), source: 'bill', bill: b.id });
+          d.expenses.push({ id: nextId(d.expenses), amount: b.amount, category: b.category, note: b.name, date: b.nextDue, at: Date.now(), source: 'bill', bill: b.id, account: spendingAccount(d)?.id ?? null });
           notes.push(...warnings(d, monthOf(b.nextDue)));
           activity('finance', { message: `Logged ${b.name} ${eur(b.amount)} (due ${b.nextDue})` });
           b.nextDue = addPeriod(b.nextDue, b.every);
@@ -276,6 +392,9 @@ export function financeView(month = monthOf(today())) {
     expenses: d.expenses.filter((e) => monthOf(e.date) === month).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id),
     byCategory: by, total, lastMonth: totals(d, prevMonth(month)).total, history: last6,
     budgets: d.budgets, bills: d.bills.filter((b) => b.active).sort((a, b) => a.nextDue.localeCompare(b.nextDue)),
+    accounts: open(d).map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: balanceOf(d, a), date: a.date })), kinds: KINDS,
+    income: d.income.filter((i) => monthOf(i.date) === month).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).map((i) => ({ ...i, accountName: accountName(d, i.account) })),
+    transfers: d.transfers.filter((t) => monthOf(t.date) === month).map((t) => ({ ...t, fromName: accountName(d, t.from), toName: accountName(d, t.to) })),
   };
 }
 // edits from the page go through the same checks as her tool
@@ -284,10 +403,13 @@ export function financeEdit(kind, op, id, body = {}) {
     expense: { add: 'spend', edit: 'edit', delete: 'delete' },
     bill: { add: 'bill_add', edit: 'bill_edit', delete: 'bill_cancel' },
     budget: { set: 'budget' },
+    account: { add: 'account_set', edit: 'account_set', delete: 'account_remove' },
+    income: { add: 'income', delete: 'income_delete' },
+    transfer: { add: 'transfer', delete: 'transfer_delete' },
   };
   const action = map[kind]?.[op];
   if (!action) throw Object.assign(new Error('unknown edit'), { status: 400 });
-  if (kind === 'expense' && op !== 'add' && !(Number(id) > 0)) throw Object.assign(new Error('which expense?'), { status: 400 });
+  if (op !== 'add' && op !== 'set' && !(Number(id) > 0)) throw Object.assign(new Error('which expense?'), { status: 400 });
   const out = moneyTool({ ...body, action, id: id ? Number(id) : undefined, source: 'chat' });
   if (out.startsWith('Error')) throw Object.assign(new Error(out.replace(/^Error:\s*/, '')), { status: 400 });
   if (kind === 'expense' && op === 'add') {
