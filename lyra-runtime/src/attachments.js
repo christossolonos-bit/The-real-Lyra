@@ -140,7 +140,8 @@ export async function readAttachments(message, { owner, conversation }) {
           writeFileSync(path.join(DOCS, file), buf);
           const doc = keep(att, `[photo] What Lyra saw when Chris sent it: ${seen}`, conversation, { id, kind: 'image', file, mime });
           extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +
-            `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.`);
+            `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.` +
+            `\nIf it's a receipt or a bill, offer to log it with your money tool (shop, total, date, a category) and log it once he says yes (source receipt); if the total isn't clear, look again or ask.`);
         } else {
           extra.push(`They sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
         }

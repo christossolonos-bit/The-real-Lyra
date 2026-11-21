@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Finance</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --warn:#c27c0e; --bad:#c43c3c; --track:#ececf0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --warn:#f0b445; --bad:#ff6b6b; --track:#1a2a33; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:14px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header h1 { margin:0; font-size:18px; }
+  header select { margin-left:auto; }
+  main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:flex; align-items:center; gap:8px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .tile b { display:block; font-size:26px; font-variant-numeric:tabular-nums; }
+  .tile small { color:var(--muted); font-size:13px; }
+  .up { color:var(--bad); } .down { color:var(--good); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:7px 6px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .scroll { overflow-x:auto; }
+  .empty { color:var(--muted); }
+  .muted { color:var(--muted); font-size:12px; }
+  input, select, button { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:6px 8px; min-width:0; }
+  button { cursor:pointer; }
+  button.primary { background:var(--accent); color:#001; border-color:var(--accent); }
+  button.link { border:0; background:none; color:var(--accent); padding:4px 6px; }
+  button.link.danger { color:var(--bad); }
+  form.add { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  form.add input[name=amount] { width:100px; }
+  form.add input[name=note], form.add input[name=name] { flex:1 1 160px; }
+  td input, td select { width:100%; padding:4px 6px; }
+  td input[type=number] { max-width:100px; }
+  .cats { display:grid; gap:10px; }
+  .cat { display:grid; grid-template-columns:130px 1fr auto; gap:10px; align-items:center; }
+  .bar { height:10px; background:var(--track); border-radius:5px; overflow:hidden; position:relative; }
+  .bar i { display:block; height:100%; background:var(--accent); border-radius:5px; }
+  .bar i.warn { background:var(--warn); } .bar i.over { background:var(--bad); }
+  .cat .val { font-variant-numeric:tabular-nums; white-space:nowrap; font-size:14px; }
+  .hist { display:flex; gap:10px; align-items:flex-end; height:120px; padding-top:8px; }
+  .hist div { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; min-width:0; }
+  .hist i { display:block; width:100%; max-width:46px; background:var(--accent); border-radius:5px 5px 0 0; min-height:2px; opacity:.55; }
+  .hist div.now i { opacity:1; }
+  .hist small { color:var(--muted); font-size:11px; white-space:nowrap; }
+  .hist b { font-size:11px; font-weight:500; font-variant-numeric:tabular-nums; }
+  .budgets { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px 16px; }
+  .budgets label { display:flex; align-items:center; gap:8px; justify-content:space-between; font-size:14px; }
+  .budgets input { width:90px; text-align:right; }
+  .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
+  .msg.show { opacity:1; }
+  .src { font-size:11px; color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:0 5px; }
+  @media (max-width:640px) { .cat { grid-template-columns:96px 1fr; } .cat .val { grid-column:1 / -1; } header select { margin-left:0; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <h1>Finance</h1>
+  <select id="month" aria-label="Month"></select>
+</header>
+<main>
+  <section class="card">
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="card">
+    <h2>By category</h2>
+    <div class="cats" id="cats"></div>
+  </section>
+
+  <section class="card">
+    <h2>Last six months</h2>
+    <div class="hist" id="hist"></div>
+  </section>
+
+  <section class="card">
+    <h2>Spending</h2>
+    <form class="add" id="addExpense">
+      <input name="amount" type="number" step="0.01" min="0.01" placeholder="€" required aria-label="Amount">
+      <select name="category" aria-label="Category"></select>
+      <input name="note" placeholder="What was it?" aria-label="Note">
+      <input name="date" type="date" aria-label="Date">
+      <button class="primary">Add</button>
+    </form>
+    <div class="scroll"><table id="expenses"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Bills and subscriptions</h2>
+    <form class="add" id="addBill">
+      <input name="name" placeholder="Netflix, electricity..." required aria-label="Name">
+      <input name="amount" type="number" step="0.01" min="0.01" placeholder="€" required aria-label="Amount">
+      <select name="every" aria-label="How often"></select>
+      <input name="next_due" type="date" required aria-label="Next due" title="Next due">
+      <select name="category" aria-label="Category"></select>
+      <select name="log" aria-label="On the day" title="On the day"><option value="auto">log it</option><option value="ask">ask me the amount</option></select>
+      <button class="primary">Add</button>
+    </form>
+    <div class="scroll"><table id="bills"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>Monthly budgets <span class="muted" style="text-transform:none;letter-spacing:0">(empty = none; she warns you at 80% and 100%)</span></h2>
+    <div class="budgets" id="budgets"></div>
+  </section>
+</main>
+<div class="msg" id="msg"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const eur = (n) => '€' + (Math.round(n * 100) / 100).toLocaleString('en-GB', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+const todayStr = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+let data = null, month = new URLSearchParams(location.search).get('month') || '';
+let editing = null; // { kind, id }
+
+function toast(t) { const m = $('#msg'); m.textContent = t; m.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => m.classList.remove('show'), 2600); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const catOptions = (sel) => [...new Set([...data.categories, ...Object.keys(data.byCategory)])].map((c) => `<option${c === sel ? ' selected' : ''}>${esc(c)}</option>`).join('');
+
+async function load() {
+  data = await api('GET', '/api/finance' + (month ? '?month=' + month : ''));
+  month = data.month;
+  render();
+}
+
+function render() {
+  const d = data;
+  $('#month').innerHTML = d.months.map((m) => `<option value="${m}"${m === d.month ? ' selected' : ''}>${esc(new Date(m + '-15T12:00').toLocaleString('en-GB', { month: 'long', year: 'numeric' }))}</option>`).join('');
+  // tiles
+  const diff = d.total - d.lastMonth;
+  const perMonth = d.bills.reduce((s, b) => s + (b.every === 'week' ? b.amount * 52 / 12 : b.amount / ({ month: 1, '2 months': 2, '3 months': 3, '6 months': 6, year: 12 }[b.every] || 1)), 0);
+  const tb = d.budgets.total;
+  $('#tiles').innerHTML = [
+    [eur(d.total), `spent in ${esc(d.monthName)}`],
+    [d.lastMonth ? `<span class="${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '+' : '−'}${eur(Math.abs(diff))}</span>` : '—', d.lastMonth ? `vs last month (${eur(d.lastMonth)})` : 'nothing last month'],
+    [tb ? `<span class="${d.total > tb ? 'up' : ''}">${eur(tb - d.total)}</span>` : '—', tb ? `left of the ${eur(tb)} budget` : 'no total budget set'],
+    [eur(perMonth), `bills a month (${d.bills.length})`],
+  ].map(([v, l]) => `<div class="tile"><b>${v}</b><small>${l}</small></div>`).join('');
+  // categories
+  const cats = Object.entries(d.byCategory).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...cats.map(([c, v]) => Math.max(v, d.budgets[c] || 0)));
+  $('#cats').innerHTML = cats.length ? cats.map(([c, v]) => {
+    const b = d.budgets[c];
+    const cls = b ? (v >= b ? 'over' : v >= b * 0.8 ? 'warn' : '') : '';
+    return `<div class="cat"><span>${esc(c)}</span><div class="bar"><i class="${cls}" style="width:${Math.min(100, v / (b || max) * 100)}%"></i></div>` +
+      `<span class="val">${eur(v)}${b ? ` <span class="muted">of ${eur(b)}</span>` : ''}</span></div>`;
+  }).join('') : '<p class="empty">Nothing spent this month yet. Add it below, or just tell Lyra ("spent €14 on lunch").</p>';
+  // history
+  const hmax = Math.max(1, ...d.history.map((h) => h.total));
+  $('#hist').innerHTML = d.history.map((h) => `<div class="${h.month === d.month ? 'now' : ''}"><b>${h.total ? eur(h.total) : ''}</b><i style="height:${h.total / hmax * 80}%"></i><small>${esc(new Date(h.month + '-15T12:00').toLocaleString('en-GB', { month: 'short' }))}</small></div>`).join('');
+  // expenses
+  $('#addExpense').category.innerHTML = catOptions('groceries');
+  if (!$('#addExpense').date.value) $('#addExpense').date.value = d.month === todayStr().slice(0, 7) ? todayStr() : d.month + '-01';
+  $('#expenses').innerHTML = d.expenses.length ? '<tr><th>Date</th><th class="num">Amount</th><th>Category</th><th>Note</th><th></th></tr>' + d.expenses.map((e) => {
+    if (editing?.kind === 'expense' && editing.id === e.id) {
+      return `<tr data-id="${e.id}"><td><input type="date" name="date" value="${e.date}"></td><td class="num"><input type="number" step="0.01" min="0.01" name="amount" value="${e.amount}"></td>` +
+        `<td><select name="category">${catOptions(e.category)}</select></td><td><input name="note" value="${esc(e.note)}"></td>` +
+        `<td class="num"><button class="link" data-act="save-expense">Save</button><button class="link" data-act="cancel">Cancel</button></td></tr>`;
+    }
+    return `<tr data-id="${e.id}"><td>${esc(new Date(e.date + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</td><td class="num">${eur(e.amount)}</td><td>${esc(e.category)}</td>` +
+      `<td>${esc(e.note)} ${e.source && e.source !== 'chat' && e.source !== 'page' ? `<span class="src">${esc(e.source)}</span>` : ''}</td>` +
+      `<td class="num"><button class="link" data-act="edit-expense">Edit</button><button class="link danger" data-act="delete-expense">Delete</button></td></tr>`;
+  }).join('') : '<tr><td class="empty">No spending logged this month.</td></tr>';
+  // bills
+  const f = $('#addBill');
+  f.every.innerHTML = d.everyOptions.map((o) => `<option${o === 'month' ? ' selected' : ''}>${esc(o)}</option>`).join('');
+  f.category.innerHTML = catOptions('subscriptions');
+  $('#bills').innerHTML = d.bills.length ? '<tr><th>Name</th><th class="num">Amount</th><th>Every</th><th>Next due</th><th>Category</th><th>On the day</th><th></th></tr>' + d.bills.map((b) => {
+    if (editing?.kind === 'bill' && editing.id === b.id) {
+      return `<tr data-id="${b.id}"><td><input name="name" value="${esc(b.name)}"></td><td class="num"><input type="number" step="0.01" min="0.01" name="amount" value="${b.amount}"></td>` +
+        `<td><select name="every">${d.everyOptions.map((o) => `<option${o === b.every ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></td>` +
+        `<td><input type="date" name="next_due" value="${b.nextDue}"></td><td><select name="category">${catOptions(b.category)}</select></td>` +
+        `<td><select name="log"><option value="auto"${b.log === 'auto' ? ' selected' : ''}>log it</option><option value="ask"${b.log === 'ask' ? ' selected' : ''}>ask me</option></select></td>` +
+        `<td class="num"><button class="link" data-act="save-bill">Save</button><button class="link" data-act="cancel">Cancel</button></td></tr>`;
+    }
+    return `<tr data-id="${b.id}"><td>${esc(b.name)}${b.waiting ? ' <span class="src">needs amount</span>' : ''}</td><td class="num">${eur(b.amount)}</td><td>${esc(b.every)}</td>` +
+      `<td>${esc(new Date(b.nextDue + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }))}</td><td>${esc(b.category)}</td><td>${b.log === 'ask' ? 'ask me' : 'log it'}</td>` +
+      `<td class="num"><button class="link" data-act="edit-bill">Edit</button><button class="link danger" data-act="delete-bill">Stop</button></td></tr>`;
+  }).join('') : '<tr><td class="empty">No bills or subscriptions yet. Add them above, or tell Lyra ("Netflix €12.99 on the 5th every month").</td></tr>';
+  // budgets
+  const bcats = ['total', ...new Set([...data.categories, ...Object.keys(d.budgets).filter((c) => c !== 'total')])];
+  $('#budgets').innerHTML = bcats.map((c) => `<label>${c === 'total' ? '<b>total</b>' : esc(c)}<input type="number" min="0" step="1" data-budget="${esc(c)}" value="${d.budgets[c] ?? ''}" placeholder="—" aria-label="Budget for ${esc(c)}"></label>`).join('');
+}
+
+const rowValues = (tr) => Object.fromEntries([...tr.querySelectorAll('input,select')].map((i) => [i.name, i.type === 'number' ? Number(i.value) : i.value]));
+
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const tr = btn.closest('tr');
+  const id = Number(tr?.dataset.id);
+  const act = btn.dataset.act;
+  try {
+    if (act === 'edit-expense') { editing = { kind: 'expense', id }; render(); }
+    else if (act === 'edit-bill') { editing = { kind: 'bill', id }; render(); }
+    else if (act === 'cancel') { editing = null; render(); }
+    else if (act === 'save-expense' || act === 'save-bill') {
+      const kind = act === 'save-expense' ? 'expense' : 'bill';
+      const r = await api('PUT', `/api/finance/${kind}/${id}`, rowValues(tr));
+      editing = null; toast(r.message); await load();
+    } else if (act === 'delete-expense') {
+      const e = data.expenses.find((x) => x.id === id);
+      if (!confirm(`Delete ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''} on ${e.date}?`)) return;
+      toast((await api('DELETE', `/api/finance/expense/${id}`)).message); await load();
+    } else if (act === 'delete-bill') {
+      const b = data.bills.find((x) => x.id === id);
+      if (!confirm(`Stop tracking ${b.name}? (This doesn't cancel it with the company.)`)) return;
+      toast((await api('DELETE', `/api/finance/bill/${id}`)).message); await load();
+    }
+  } catch (err) { toast(err.message); }
+});
+
+$('#addExpense').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  try {
+    const r = await api('POST', '/api/finance/expense', { amount: Number(f.amount.value), category: f.category.value, note: f.note.value, date: f.date.value });
+    toast(r.message); f.amount.value = ''; f.note.value = '';
+    month = f.date.value.slice(0, 7); await load(); f.amount.focus();
+  } catch (err) { toast(err.message); }
+});
+$('#addBill').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  try {
+    const r = await api('POST', '/api/finance/bill', { name: f.name.value, amount: Number(f.amount.value), every: f.every.value, next_due: f.next_due.value, category: f.category.value, log: f.log.value });
+    toast(r.message); f.reset(); await load();
+  } catch (err) { toast(err.message); }
+});
+$('#budgets').addEventListener('change', async (ev) => {
+  const i = ev.target.closest('input[data-budget]');
+  if (!i) return;
+  try { toast((await api('PUT', '/api/finance/budget', { category: i.dataset.budget, amount: Number(i.value) || 0 })).message); await load(); }
+  catch (err) { toast(err.message); }
+});
+$('#month').addEventListener('change', (ev) => { month = ev.target.value; editing = null; $('#addExpense').date.value = ''; history.replaceState(null, '', '?month=' + month); load(); });
+
+load().catch((err) => { $('#tiles').innerHTML = `<p class="empty">Couldn't load: ${esc(err.message)}</p>`; });
+</script>
+</body>
+</html>

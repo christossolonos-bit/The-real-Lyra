@@ -67,6 +67,15 @@ function reminderTool({ action, text = '', when: w = '', id = 0 }, ctx) {
   return 'Error: action must be set, list, cancel or done.';
 }
 
+// a reminder set by her other skills (a bill due tomorrow, finance.js)
+export function addReminder(text, due = Date.now()) {
+  const d = load();
+  const r = { id: nextId(d.reminders), text: String(text).slice(0, 300), due, created: Date.now(), by: 'Lyra', times: 0, announcedAt: 0, done: false };
+  d.reminders.push(r);
+  save(d);
+  return r;
+}
+
 // every 15 s: anything due goes out (and comes back if he didn't answer)
 export function startReminders(deliver) {
   const tick = async () => {

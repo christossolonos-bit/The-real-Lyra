@@ -90,6 +90,21 @@ activity('sleep', { message: 'Sleep cycles armed' });
   });
 }
 
+// Chris's spending tracker (finance.js): bills due tomorrow become reminders; budget warnings, bills that need an
+// amount and the monthly summary come as a Discord DM
+{
+  const { startFinance } = await import('./finance.js');
+  const { addReminder } = await import('./personal.js');
+  startFinance({
+    remind: async (text, due) => addReminder(text, due),
+    dm: async (text) => {
+      const owner = config.ownerIds[0];
+      if (!bot.client || !owner) throw new Error('Discord offline: money note not sent');
+      await (await bot.client.users.fetch(owner)).send(text);
+    },
+  });
+}
+
 // Continuity: a heartbeat so downtime is known after a restart, plus her recent mistakes.
 startContinuity();
 

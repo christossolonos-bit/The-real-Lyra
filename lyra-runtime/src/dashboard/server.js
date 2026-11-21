@@ -274,6 +274,12 @@ function buildRoutes(bot) {
     }),
     // Chris's reminders, to-dos and check-in snooze (personal.js)
     r('GET', '/api/personal', async () => (await import('../personal.js')).personalSnapshot()),
+    // Chris's spending (finance.js; /finance.html): see a month, and edit expenses, bills and budgets
+    r('GET', '/api/finance', async ({ url }) => (await import('../finance.js')).financeView(url.searchParams.get('month') || undefined)),
+    r('POST', '/api/finance/(?<kind>expense|bill)', async ({ params, body }) => (await import('../finance.js')).financeEdit(params.kind, 'add', 0, body)),
+    r('PUT', '/api/finance/(?<kind>expense|bill)/(?<id>\\d+)', async ({ params, body }) => (await import('../finance.js')).financeEdit(params.kind, 'edit', params.id, body)),
+    r('DELETE', '/api/finance/(?<kind>expense|bill)/(?<id>\\d+)', async ({ params }) => (await import('../finance.js')).financeEdit(params.kind, 'delete', params.id)),
+    r('PUT', '/api/finance/budget', async ({ body }) => (await import('../finance.js')).financeEdit('budget', 'set', 0, body)),
     // Lyra Core: her own learning system's scoreboard (/core.html)
     r('GET', '/api/core', async () => (await import('../core/index.js')).core.stats()),
     r('POST', '/api/core/consolidate', async () => (await import('../core/index.js')).core.consolidate()),
