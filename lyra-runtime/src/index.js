@@ -90,6 +90,26 @@ activity('sleep', { message: 'Sleep cycles armed' });
   });
 }
 
+// Chris's day (daily.js): shift reminders, out while at work, the morning brief as a DM at his time
+{
+  const { startDaily } = await import('./daily.js');
+  const { respond } = await import('./companion.js');
+  startDaily({
+    sendBrief: async (facts) => {
+      const owner = config.ownerIds[0];
+      if (!bot.client || !owner) throw new Error('Discord offline: morning brief not sent');
+      const user = await bot.client.users.fetch(owner);
+      const dm = await user.createDM();
+      const reply = await respond({
+        conversation: `text:${dm.id}`,
+        speaker: { id: owner, name: 'Chris', username: user.username },
+        cue: `It's morning. Send Chris his morning brief as a short Discord message in your own words (not a list read out): what's on today, anything due, the weather, and a line about yesterday if you know it. The facts:\n${facts}`,
+      });
+      if (reply?.trim()) await user.send(reply.trim().slice(0, 1900));
+    },
+  });
+}
+
 // Chris's spending tracker (finance.js): bills due tomorrow become reminders; budget warnings, bills that need an
 // amount and the monthly summary come as a Discord DM
 {

@@ -139,8 +139,17 @@ export async function readAttachments(message, { owner, conversation }) {
           mkdirSync(DOCS, { recursive: true });
           writeFileSync(path.join(DOCS, file), buf);
           const doc = keep(att, `[photo] What Lyra saw when Chris sent it: ${seen}`, conversation, { id, kind: 'image', file, mime });
+          // a work schedule: his row is read straight away (daily.js), so his shifts are saved without him asking
+          let schedule = '';
+          if (/\b(rota|schedule|shifts?|timetable|roster)\b/i.test(seen)) {
+            try {
+              const r = await (await import('./daily.js')).readSchedule(doc.id);
+              schedule = r.startsWith('Error') ? `You couldn't find him on it yet: ${r.replace(/^Error:\s*/, '')}` : `You've already read his shifts off it and saved them: ${r}`;
+            } catch (err) { schedule = `Reading his shifts failed (${err.message}); tell him.`; }
+          }
           extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +
             `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.` +
+            (schedule ? `\nIt's his work schedule. ${schedule}` : '') +
             `\nIf it's a receipt or a bill, offer to log it with your money tool (shop, total, date, a category) and log it once he says yes (source receipt); if the total isn't clear, look again or ask.`);
         } else {
           extra.push(`They sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
@@ -212,6 +221,16 @@ async function documentsTool({ action, id = 0, name = '', query = '', part = 0, 
     return `"${doc.name}" part ${n + 1} of ${parts}:\n${text.slice(n * size, (n + 1) * size)}`;
   }
   return 'Error: action must be list, read, search or look.';
+}
+
+// a kept photo (or a PDF's first page) looked at with a prompt of the caller's (daily.js reads schedules with it)
+export async function lookAtKept(id, prompt, maxTokens = 600) {
+  const list = index();
+  const doc = list.find((d) => d.id === Number(id)) || [...list].reverse().find((d) => d.kind === 'image' || d.kind === 'pdf');
+  if (!doc) throw new Error('no photo to look at');
+  const file = doc.kind === 'image' ? path.join(DOCS, doc.file) : pagePicture(doc.id, 1);
+  if (!existsSync(file)) throw new Error('that picture is no longer on this PC');
+  return vision(prompt, readFileSync(file), doc.kind === 'image' ? doc.mime || 'image/jpeg' : 'image/jpeg', maxTokens);
 }
 
 // Look at a kept photo or a PDF page again, with his question in mind

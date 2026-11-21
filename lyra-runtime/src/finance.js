@@ -42,12 +42,42 @@ const prevMonth = (m) => { const [y, mo] = m.split('-').map(Number); return mo =
 const monthName = (m) => new Date(`${m}-15T12:00`).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
 const eur = (n) => `€${(Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, '')}`;
 const money = (x) => { const n = Math.round(Number(String(x ?? '').replace(/[€,\s]|eur(os?)?/gi, '')) * 100) / 100; return Number.isFinite(n) ? n : NaN; };
-const category = (c) => {
+// Where spending goes (2026-11-22: he wants what he tells her filed in the right place of his monthly budget).
+// Order: a category he has a budget for, a known category, a guess from what it was (the note or bill name,
+// e.g. cablenet = bills, ice cream = eating out), else other.
+const ALIAS = { food: 'groceries', supermarket: 'groceries', restaurant: 'eating out', takeaway: 'eating out', coffee: 'eating out', lunch: 'eating out', dinner: 'eating out', snacks: 'eating out', petrol: 'fuel', gas: 'fuel', diesel: 'fuel', car: 'transport', bus: 'transport', taxi: 'transport', parking: 'transport', rent: 'home', utilities: 'bills', electricity: 'bills', water: 'bills', internet: 'bills', phone: 'bills', subscription: 'subscriptions', streaming: 'subscriptions', software: 'subscriptions', doctor: 'health', pharmacy: 'health', gym: 'health', clothes: 'shopping', entertainment: 'fun', leisure: 'fun', present: 'gifts' };
+const GUESS = [
+  ['subscriptions', /netflix|spotify|disney|youtube premium|prime video|amazon prime|apple (music|tv|one)|icloud|google one|cursor|claude|anthropic|chatgpt|openai|midjourney|adobe|canva|patreon|xbox game pass|ps plus|subscription/],
+  ['bills', /electric|\beac\b|water bill|\bwater\b|internet|wi-?fi|broadband|cablenet|cyta|\bepic\b|primetel|phone bill|mobile (bill|plan)|insurance|council|tax/],
+  ['groceries', /supermarket|alphamega|lidl|sklavenitis|metro|papantoniou|grocer|groceries|fruit|vegetables|milk|bread|eggs/],
+  ['eating out', /restaurant|cafe|café|coffee|lunch|dinner|breakfast|brunch|takeaway|take-away|souvlaki|pizza|burger|kebab|gyro|ice[ -]?cream|dessert|bakery|sandwich|snack|wolt|foody|bolt food|mcdonald|kfc|starbucks|costa/],
+  ['fuel', /fuel|petrol|diesel|gas station|petrolina|\besso\b|\beko\b|\bshell\b|\btotal\b/],
+  ['transport', /\bbus\b|taxi|\bbolt\b|uber|parking|toll|car wash|car service|\bmot\b|tyres?|flight|ferry/],
+  ['home', /\brent\b|furniture|ikea|cleaning|repair|plumber|electrician|jumbo|homeware/],
+  ['health', /pharmacy|doctor|dentist|clinic|hospital|\bgym\b|vitamin|medicine|optician/],
+  ['fun', /cinema|movie|\bgame\b|steam|playstation|\bxbox\b|concert|\bbar\b|drinks|club|bowling|tickets?/],
+  ['gifts', /\bgift|present|birthday|wedding|christening/],
+  ['shopping', /clothes|shoes|amazon|temu|shein|zara|h&m|electronics|public|stephanis|kotsovolos/],
+  ['work', /equipment|office|domain|hosting|server/],
+];
+function guessCategory(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return '';
+  return GUESS.find(([, re]) => re.test(t))?.[0] || '';
+}
+// d: his data (his budget categories win); what: the note or bill name, for a guess
+function category(c, d = null, what = '') {
   const t = String(c || '').trim().toLowerCase();
-  if (!t) return 'other';
-  const alias = { food: 'groceries', supermarket: 'groceries', restaurant: 'eating out', takeaway: 'eating out', coffee: 'eating out', lunch: 'eating out', dinner: 'eating out', petrol: 'fuel', gas: 'fuel', diesel: 'fuel', bus: 'transport', taxi: 'transport', parking: 'transport', rent: 'home', electricity: 'bills', water: 'bills', internet: 'bills', phone: 'bills', subscription: 'subscriptions', streaming: 'subscriptions', doctor: 'health', pharmacy: 'health', clothes: 'shopping' };
-  return alias[t] || t.slice(0, 40);
-};
+  const budgets = Object.keys(d?.budgets || {}).filter((k) => k !== 'total');
+  if (t && budgets.includes(t)) return t;
+  const known = ALIAS[t] || (CATEGORIES.includes(t) ? t : '');
+  const guess = guessCategory(`${what} ${t}`);
+  const billish = ['bills', 'subscriptions'];
+  // her pick stands, except bills vs subscriptions, which the name settles (Cablenet is a bill, Netflix a subscription)
+  if (known && known !== 'other' && !(billish.includes(known) && billish.includes(guess))) return known;
+  if (guess) return guess;
+  return t && t !== 'other' && !known ? t.slice(0, 40) : 'other';
+}
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00`));
 function addPeriod(date, every) {
   const [months, days] = EVERY[every] || EVERY.month;
@@ -183,19 +213,22 @@ function moneyTool(a, ctx) {
     let acc = none ? null : a.account ? findAccount(d, a.account) : spendingAccount(d);
     if (a.account && !none && !acc) return `Error: no account called "${a.account}". Use accounts to see them.`;
     if (a.account && acc && !saidAccount(acc, ctx?.userText)) acc = spendingAccount(d); // he didn't say it this time
-    const e = { id: nextId(d.expenses), amount, category: category(a.category), note: String(a.note || '').trim().slice(0, 200), date, at: Date.now(), source: a.source === 'receipt' ? 'receipt' : 'chat', account: acc?.id ?? null };
+    if (/^(income|salary|wages?|pay|tips?)$/i.test(String(a.category || '').trim())) return "Error: that's money he received, not spending. Log it with income (amount, note), not spend.";
+    const e = { id: nextId(d.expenses), amount, category: category(a.category, d, a.note), note: String(a.note || '').trim().slice(0, 200), date, at: Date.now(), source: a.source === 'receipt' ? 'receipt' : 'chat', account: acc?.id ?? null };
     d.expenses.push(e);
     const warn = warnings(d, monthOf(date));
     save(d);
     const left = acc ? ` ${acc.name} now ${eur(balanceOf(d, acc))}.` : '';
     activity('finance', { message: `Logged ${eur(amount)} ${e.category}${e.note ? ` (${e.note})` : ''}` });
     const { by } = totals(d, monthOf(date));
-    return `Logged #${e.id}: ${eur(amount)} on ${e.category}${e.note ? `, ${e.note}` : ''}, ${date}${acc ? `, from ${acc.name}` : ''}. ${e.category} this month: ${eur(by[e.category])}${d.budgets[e.category] ? ` of ${eur(d.budgets[e.category])}` : ''}.${left}` +
+    const budgetNames = Object.keys(d.budgets).filter((k) => k !== 'total');
+    const noBudget = budgetNames.length && !d.budgets[e.category] ? ` (No budget for ${e.category}; his budgets: ${budgetNames.join(', ')}.)` : '';
+    return `Logged #${e.id}: ${eur(amount)} on ${e.category}${e.note ? `, ${e.note}` : ''}, ${date}${acc ? `, from ${acc.name}` : ''}. ${e.category} this month: ${eur(by[e.category])}${d.budgets[e.category] ? ` of ${eur(d.budgets[e.category])}` : ''}.${noBudget}${left}` +
       (warn.length ? ` Tell him: ${warn.join(' ')}` : '') + ' Confirm briefly.';
   }
   if (act === 'list') {
     const month = /^\d{4}-\d{2}$/.test(a.month || '') ? a.month : monthOf(today());
-    const cat = a.category ? category(a.category) : '';
+    const cat = a.category ? category(a.category, d) : '';
     const rows = d.expenses.filter((e) => monthOf(e.date) === month && (!cat || e.category === cat)).sort((x, y) => y.date.localeCompare(x.date) || y.id - x.id);
     const ins = cat ? [] : d.income.filter((i) => monthOf(i.date) === month);
     const out = rows.length ? `${monthName(month)}${cat ? `, ${cat}` : ''}:\n` + rows.slice(0, 40).map((e) => `#${e.id} ${e.date} ${eur(e.amount)} ${e.category}${e.note ? ` (${e.note})` : ''}`).join('\n') : `Nothing logged for ${monthName(month)}${cat ? ` in ${cat}` : ''}.`;
@@ -210,7 +243,7 @@ function moneyTool(a, ctx) {
       return `Deleted #${e.id}: ${eur(e.amount)} ${e.category} on ${e.date}.`;
     }
     if (a.amount !== undefined) { const n = money(a.amount); if (!(n > 0)) return 'Error: amount must be positive.'; e.amount = n; }
-    if (a.category) e.category = category(a.category);
+    if (a.category) e.category = category(a.category, d, a.note ?? e.note);
     if (a.note !== undefined) e.note = String(a.note).slice(0, 200);
     if (a.date) { if (!isDate(a.date)) return 'Error: date must be YYYY-MM-DD.'; e.date = a.date; }
     if (a.account !== undefined) {
@@ -299,7 +332,7 @@ function moneyTool(a, ctx) {
   if (act === 'summary') return summaryText(/^\d{4}-\d{2}$/.test(a.month || '') ? a.month : monthOf(today())) +
     ' Say it conversationally, point out what stands out (biggest category, changes from last month, budgets close to the limit).';
   if (act === 'budget') {
-    const cat = String(a.category || '').trim().toLowerCase() === 'total' ? 'total' : category(a.category);
+    const cat = String(a.category || '').trim().toLowerCase() === 'total' ? 'total' : category(a.category, d);
     const n = money(a.amount);
     if (!(n >= 0)) return 'Error: amount must be a number of euros per month (0 removes the budget).';
     if (n === 0) delete d.budgets[cat]; else d.budgets[cat] = n;
@@ -315,7 +348,17 @@ function moneyTool(a, ctx) {
     let due = a.next_due && isDate(a.next_due) ? a.next_due : null;
     if (!due) return 'Error: next_due must be the next date it is charged, YYYY-MM-DD (work it out from today in your prompt, e.g. "on the 5th" = the coming 5th).';
     while (due < today()) due = addPeriod(due, every);
-    const b = { id: nextId(d.bills), name: String(a.name).trim().slice(0, 80), amount, category: a.category ? category(a.category) : 'subscriptions', every, nextDue: due, log: a.log === 'ask' ? 'ask' : 'auto', active: true, reminded: '' };
+    // the same bill again ("Cablenet internet" when "cablenet" is set up): updated, not added twice
+    const key = (x) => String(x).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const first = (x) => key(x).split(' ')[0];
+    const same = d.bills.find((x) => x.active && (key(x.name) === key(a.name) || (first(x.name).length >= 4 && first(x.name) === first(a.name))));
+    if (same) {
+      Object.assign(same, { amount, every, nextDue: due, reminded: '', category: category(a.category, d, a.name) === 'other' ? same.category : category(a.category, d, a.name) });
+      if (a.log) same.log = a.log === 'ask' ? 'ask' : 'auto';
+      save(d);
+      return `${same.name} was already set up: updated to ${eur(amount)} every ${every}, next on ${due} (${same.category}).`;
+    }
+    const b = { id: nextId(d.bills), name: String(a.name).trim().slice(0, 80), amount, category: category(a.category, d, a.name) === 'other' ? 'subscriptions' : category(a.category, d, a.name), every, nextDue: due, log: a.log === 'ask' ? 'ask' : 'auto', active: true, reminded: '' };
     d.bills.push(b);
     save(d);
     return `Added #${b.id}: ${b.name}, ${eur(amount)} every ${every}, next on ${due}. You'll remind him the day before${b.log === 'auto' ? " and log it as spent on the day" : ', and ask him the amount on the day'}.`;
@@ -342,7 +385,7 @@ function moneyTool(a, ctx) {
     }
     if (a.amount !== undefined) { const n = money(a.amount); if (!(n > 0)) return 'Error: amount must be positive.'; b.amount = n; }
     if (a.name && a.id) b.name = String(a.name).slice(0, 80);
-    if (a.category) b.category = category(a.category);
+    if (a.category) b.category = category(a.category, d, b.name);
     if (a.every && EVERY[a.every]) b.every = a.every;
     if (a.next_due) { if (!isDate(a.next_due)) return 'Error: next_due must be YYYY-MM-DD.'; b.nextDue = a.next_due; b.reminded = ''; }
     if (a.log) b.log = a.log === 'ask' ? 'ask' : 'auto';
@@ -355,10 +398,23 @@ function moneyTool(a, ctx) {
 export const FINANCE_TOOLS = {
   money: {
     enabled: (ctx) => Boolean(ctx?.perms?.owner),
-    definition: { type: 'function', function: {
+    // a getter: read each turn, so it names the budget categories he has right now
+    get definition() { return moneyDefinition(); },
+    run: (args, ctx) => moneyTool(args, ctx),
+  },
+};
+function moneyDefinition() {
+  const d = load();
+  const budgets = Object.keys(d.budgets).filter((k) => k !== 'total');
+  const extra = [...new Set([...budgets, ...d.expenses.map((e) => e.category)])].filter((c) => !CATEGORIES.includes(c) && c !== 'income');
+  return { type: 'function', function: {
       name: 'money',
       description: "Chris's spending tracker (you're his bookkeeper, not a financial adviser; euros, Cyprus dates). " +
-        "spend = log something he spent (amount, category, note, date YYYY-MM-DD if not today; source 'receipt' if from a receipt photo he confirmed). Categories: " + CATEGORIES.join(', ') + '. ' +
+        "spend = log something he spent (amount, category, note = what it was, date YYYY-MM-DD if not today; source 'receipt' if from a receipt photo he confirmed). " +
+        `Categories: ${[...CATEGORIES, ...extra].join(', ')}. ` +
+        (budgets.length ? `He has monthly budgets for: ${budgets.join(', ')}${d.budgets.total ? ' (and a total)' : ''}: when something belongs under one of those, use exactly that category. ` : '') +
+        'Pick the category by what it was: food shopping = groceries; cafés, restaurants, takeaway, snacks, ice cream = eating out; electricity, water, internet, phone (Cablenet, Cyta, EAC) = bills; Netflix, Spotify, apps and software plans = subscriptions; petrol = fuel. Always give the note (what it was). ' +
+        'Money he received (tips, salary, refunds, someone paying him back) is never spend: use income. ' +
         'list = expenses of a month (month YYYY-MM, category). edit / delete = by id (from list; no id = the last one logged). ' +
         'summary = a month\'s totals by category vs budgets and last month. budget = set a monthly budget (category or "total", amount; 0 removes). ' +
         'bill_add = a subscription or recurring bill (name, amount, every: week / month / 2 months / 3 months / 6 months / year, next_due YYYY-MM-DD, category, log "auto" to log it on the day or "ask" for bills that vary). ' +
@@ -369,7 +425,7 @@ export const FINANCE_TOOLS = {
         "add / take = put money into or take it out of one account (account, amount, note), e.g. 'add 20 to my cash', 'take 50 out of savings' - not spending (that's spend) and not pay (that's income). " +
         "account_set is only for 'X is now N' (the new total, never the difference). Savings and investing keep the value he last gave you. " +
         "You don't track markets or give investment advice. " +
-        "Log only what he actually tells you he spent; if a receipt or amount is unclear, ask before logging. Pass any budget warning on to him.",
+        "Log only what he actually tells you he spent; if a receipt or amount is unclear, ask before logging. Say which budget category it went under, and pass any budget warning on to him.",
       parameters: { type: 'object', properties: {
         action: { type: 'string', enum: ['spend', 'list', 'edit', 'delete', 'summary', 'budget', 'bill_add', 'bills', 'bill_edit', 'bill_cancel', 'bill_paid', 'account_set', 'accounts', 'account_remove', 'income', 'transfer', 'add', 'take', 'card'] },
         account: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, kind: { type: 'string', enum: KINDS },
@@ -377,10 +433,8 @@ export const FINANCE_TOOLS = {
         id: { type: 'number' }, name: { type: 'string' }, every: { type: 'string', enum: Object.keys(EVERY) }, next_due: { type: 'string' },
         log: { type: 'string', enum: ['auto', 'ask'] }, source: { type: 'string', enum: ['chat', 'receipt'] },
       }, required: ['action'] },
-    } },
-    run: (args, ctx) => moneyTool(args, ctx),
-  },
-};
+    } };
+}
 
 // ---------- bills, warnings and the monthly summary, in the background ----------
 // remind(text, dueMs): a normal reminder (personal.js); dm(text): a Discord DM to Chris
@@ -430,6 +484,12 @@ export function startFinance({ remind, dm }) {
 }
 
 // ---------- the dashboard's Finance page ----------
+// bills due in the next few days (the morning brief, daily.js)
+export function billsDue(days = 7) {
+  const until = today(new Date(Date.now() + days * 86_400_000));
+  return load().bills.filter((b) => b.active && b.nextDue <= until).sort((a, b) => a.nextDue.localeCompare(b.nextDue)).map((b) => ({ name: b.name, amount: b.amount, nextDue: b.nextDue }));
+}
+
 export function financeView(month = monthOf(today())) {
   const d = load();
   if (!/^\d{4}-\d{2}$/.test(month)) month = monthOf(today());

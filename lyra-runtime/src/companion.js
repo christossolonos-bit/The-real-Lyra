@@ -125,6 +125,8 @@ export async function planTurn(history, speaker, text, tools) {
         `- generate_music only when the conversation already says what the song should be about (topic, mood or style) AND how long (a 30-second clip or a full song). If either is missing, pick nothing so ${config.botName} can ask.\n` +
         `- money for anything about his money: spending, bills, budgets, account balances, money in or moved, "how much do I have", "check my finance". Pick it even if it was answered earlier in the conversation: balances change, and the answer must come from the tracker, never from memory.\n` +
         `- documents for questions about a file or photo he sent (what it says or shows), even if asked before.\n` +
+        `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
+        `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
         `- When unsure, pick nothing.\n` +
         `Reply as JSON only: {"actions": [{"tool": "<name>", "query": "<web_search only>"}], "reason": "<a few words>"}. Use {"actions": []} when nothing is needed.`,
     },
@@ -161,6 +163,8 @@ export async function planTurn(history, speaker, text, tools) {
   if (theaterAsk(text) || (showing && /\b(theater|theatre|video|watching|pause|resume|skip|what.*(on|playing|watching))\b/.test(low))) ensure('theater');
   else if (musicAsk(text) || /\b(spotify|radio)\b/.test(low) || (/\b(pause|resume|skip|stop)\b/.test(low) && /\b(music|song|track|playing)\b/.test(low))) ensure('music');
   if (/\b(persona|personality|character prompt)\b/.test(low) && /\b(update|change|edit|rewrite|more |less )\b/.test(low)) ensure('update_persona');
+  // his work shifts and schedule (daily.js)
+  if (/\b(rota|schedule|shifts?|my hours|on it as|i'?m .{1,20} on (it|the (rota|schedule)))\b/.test(low) || /\bwork (on |this |next |tomorrow|today|at )/.test(low)) ensure('shifts');
   // his money: always looked up, never answered from the conversation (2026-11-21)
   if (/\b(money|finance|finances|balance|balances|budget|spent|spending|bills?|subscriptions?|savings|revolut|bank account|how much (do|have) i)\b/.test(low)) ensure('money');
   if (/\b(posture|zombie|stiff arms|animation|rocketbox|stand (up )?normal|fix (your |her )?pose)\b/.test(low)) ensure('avatar_motion');
@@ -211,8 +215,14 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // Theater is shared across Discord / avatar: when a show is on, she must know she's watching it.
   let theaterBlock = '';
   try { theaterBlock = character.main ? theater().promptBlock() : ''; } catch {}
+  // his day (daily.js): at work, how was work, the morning brief, the night wrap-up
+  let dayBlock = '';
+  if (!cue && perms.owner && character.main) {
+    try { dayBlock = await (await import('./daily.js')).dayPrompt(text); } catch (err) { activity('error', { where: 'day', message: err.message }); }
+  }
   systemExtra = [
     systemExtra,
+    dayBlock,
     character.main && continuity.continuityBlock({ conversation, speakerName: cue ? null : speaker.name, speakerLastSeen, convLastActive }),
     obligationsPrompt(speaker, due, priorities),
     scratch.promptBlock(conversation),
@@ -279,6 +289,8 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // Shot one: decide what, if anything, to do. Banter cues never take actions.
   const actions = available.filter((t) => !ALWAYS.includes(t.function.name));
   const plan = cue || !actions.length ? { search: null, tools: [] } : await planTurn(history, speaker, text, actions);
+  // a wrap-up he may be answering, or a brief / work question pending: the day tool in hand (daily.js)
+  if (!cue && /save it with your day tool|your day tool, town/.test(dayBlock) && actions.some((t) => t.function.name === 'day') && !plan.tools.includes('day')) plan.tools.push('day');
   if (!cue) {
     // Always log the plan shot so the studio cortex can light Planner even on chat-only turns.
     activity('plan', {

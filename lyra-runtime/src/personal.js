@@ -250,6 +250,15 @@ export const PERSONAL_TOOLS = {
 };
 
 // for the dashboard / hologram server
+// tick off to-dos by id (the night wrap-up, daily.js); returns their texts
+export function finishTodos(ids) {
+  const d = load();
+  const done = [];
+  for (const t of d.todos) if (!t.done && ids.includes(t.id)) { t.done = 'done'; t.doneAt = Date.now(); done.push(t.text); }
+  if (done.length) save(d);
+  return done;
+}
+
 export function personalSnapshot() {
   const d = load();
   return { reminders: d.reminders.filter((r) => !r.done), todos: d.todos.filter((t) => !t.done), wellbeing: d.wellbeing || {}, presence: d.presence || { away: false } };
