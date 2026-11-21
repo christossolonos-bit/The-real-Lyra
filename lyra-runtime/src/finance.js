@@ -12,6 +12,11 @@
 //    a balance he gives her, then his spending comes off his spending account (Bank, unless he says otherwise),
 //    money in goes onto it, moving money between accounts moves it; savings and investing keep the value he gives
 //    until he tells her a new one (she doesn't track markets or advise on them)
+//  - add / take (2026-11-22): money put into or taken out of an account that
+//    isn't spending or income (cash he put in the jar, cash he moved out), kept as adjustments
+//  - the card account (2026-11-22): one
+//    account can carry the card mark; spending comes off it unless he says cash or names another, and "card"
+//    in what he says means it. Without a card mark, his spending-type account is used.
 //  - the dashboard's Finance page reads and edits the same file (financeView, financeEdit)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -23,7 +28,7 @@ export const CATEGORIES = ['groceries', 'eating out', 'fuel', 'transport', 'bill
 const EVERY = { week: [0, 7], month: [1, 0], '2 months': [2, 0], '3 months': [3, 0], '6 months': [6, 0], year: [12, 0] };
 
 function load() {
-  const blank = { expenses: [], bills: [], budgets: {}, warned: {}, summarized: '', accounts: [], income: [], transfers: [] };
+  const blank = { expenses: [], bills: [], budgets: {}, warned: {}, summarized: '', accounts: [], income: [], transfers: [], adjustments: [] };
   try { return { ...blank, ...JSON.parse(readFileSync(FILE, 'utf8')) }; }
   catch { return blank; }
 }
@@ -66,10 +71,23 @@ const kindOf = (name, kind) => (KINDS.includes(kind) ? kind : /sav/i.test(name) 
 const open = (d) => d.accounts.filter((a) => a.active !== false);
 function findAccount(d, x) {
   if (x === undefined || x === null || x === '') return null;
-  const t = String(x).trim().toLowerCase();
+  const t = String(x).trim().toLowerCase().replace(/^(my|the)\s+/, '').replace(/\s+(account|acc)$/, '') || String(x).trim().toLowerCase();
+  if (/^(debit |bank )?card$/.test(t)) return open(d).find((a) => a.card) || open(d).find((a) => a.name.toLowerCase().includes('card')) || null;
   return open(d).find((a) => a.id === Number(x)) || open(d).find((a) => a.name.toLowerCase() === t) || open(d).find((a) => a.name.toLowerCase().includes(t)) || null;
 }
-const spendingAccount = (d) => open(d).find((a) => a.kind === 'spending') || null;
+const spendingAccount = (d) => open(d).find((a) => a.card) || open(d).find((a) => a.kind === 'spending') || null;
+// The model sometimes fills every field and carries "cash" over from an earlier message. When his message is
+// known (ctx.userText) and doesn't mention the account she picked, the default (his card) is used.
+function saidAccount(acc, text) {
+  if (!acc || text === undefined || text === null) return true;
+  const t = String(text).toLowerCase();
+  if (acc.card && /\bcard\b/.test(t)) return true;
+  return acc.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((w) => w.length >= 3 && t.includes(w));
+}
+function markCard(d, acc, on) {
+  for (const a of d.accounts) if (on && a !== acc) delete a.card;
+  if (on) acc.card = true; else delete acc.card;
+}
 // the balance he gave, then everything recorded after it
 export function balanceOf(d, a) {
   let b = a.balance;
@@ -77,6 +95,7 @@ export function balanceOf(d, a) {
   for (const e of d.expenses) if (e.account === a.id && after(e)) b -= e.amount;
   for (const i of d.income) if (i.account === a.id && after(i)) b += i.amount;
   for (const t of d.transfers) if (after(t)) { if (t.from === a.id) b -= t.amount; if (t.to === a.id) b += t.amount; }
+  for (const x of d.adjustments) if (x.account === a.id && after(x)) b += x.amount;
   return Math.round(b * 100) / 100;
 }
 const accountsLine = (d) => {
@@ -133,17 +152,37 @@ export function summaryText(month = monthOf(today())) {
 }
 
 // ---------- the tool ----------
-function moneyTool(a) {
+function moneyTool(a, ctx) {
   const d = load();
   const act = a.action;
+  // she often names the account in "account": for the account actions that's the name
+  if (['account_set', 'account_remove'].includes(act) && !a.name && !a.id && a.account) a = { ...a, name: a.account };
+  if (act === 'add' || act === 'take') {
+    const amount = Math.abs(money(a.amount));
+    if (!(amount > 0)) return 'Error: amount must be a number of euros.';
+    const acc = findAccount(d, a.account || a.name);
+    if (!acc) return `Error: ${a.account || a.name ? `no account called "${a.account || a.name}"` : 'which account (account)?'}. His accounts: ${open(d).map((x) => x.name).join(', ') || 'none yet'}.`;
+    const x = { id: nextId(d.adjustments), account: acc.id, amount: act === 'add' ? amount : -amount, note: String(a.note || '').trim().slice(0, 200), date: a.date && isDate(a.date) ? a.date : today(), at: Date.now() };
+    d.adjustments.push(x);
+    save(d);
+    return `${act === 'add' ? 'Added' : 'Took'} ${eur(amount)} ${act === 'add' ? 'to' : 'from'} ${acc.name}${x.note ? ` (${x.note})` : ''}: now ${eur(balanceOf(d, acc))}.`;
+  }
+  if (act === 'adjust_delete') {
+    const x = d.adjustments.find((y) => y.id === Number(a.id));
+    if (!x) return 'Error: no such entry.';
+    d.adjustments = d.adjustments.filter((y) => y !== x);
+    save(d);
+    return `Undid ${x.amount > 0 ? 'adding' : 'taking'} ${eur(Math.abs(x.amount))} ${x.amount > 0 ? 'to' : 'from'} ${accountName(d, x.account)}.`;
+  }
   if (act === 'spend') {
     const amount = money(a.amount);
     if (!(amount > 0)) return 'Error: amount must be a positive number of euros.';
     const date = a.date ? String(a.date).slice(0, 10) : today();
     if (!isDate(date)) return 'Error: date must be YYYY-MM-DD (Cyprus date), or leave it out for today.';
     const none = a.account === 'none'; // the page's "—": not from any account
-    const acc = none ? null : a.account ? findAccount(d, a.account) : spendingAccount(d);
+    let acc = none ? null : a.account ? findAccount(d, a.account) : spendingAccount(d);
     if (a.account && !none && !acc) return `Error: no account called "${a.account}". Use accounts to see them.`;
+    if (a.account && acc && !saidAccount(acc, ctx?.userText)) acc = spendingAccount(d); // he didn't say it this time
     const e = { id: nextId(d.expenses), amount, category: category(a.category), note: String(a.note || '').trim().slice(0, 200), date, at: Date.now(), source: a.source === 'receipt' ? 'receipt' : 'chat', account: acc?.id ?? null };
     d.expenses.push(e);
     const warn = warnings(d, monthOf(date));
@@ -196,15 +235,23 @@ function moneyTool(a) {
     }
     if (a.id && a.name) acc.name = String(a.name).trim().slice(0, 60);
     if (a.kind && KINDS.includes(a.kind)) acc.kind = a.kind;
+    if (a.card !== undefined) markCard(d, acc, a.card === true || a.card === 'true');
     acc.balance = amount;
     acc.asOf = Date.now();
     acc.date = today();
     save(d);
     return `${acc.name} set to ${eur(amount)}. Accounts: ${accountsLine(d)}.`;
   }
+  if (act === 'card') {
+    const acc = findAccount(d, a.account || a.name);
+    if (!acc) return `Error: which account is his card on? His accounts: ${open(d).map((x) => x.name).join(', ')}.`;
+    markCard(d, acc, true);
+    save(d);
+    return `His card is on ${acc.name}: card spending comes off it from now on.`;
+  }
   if (act === 'accounts') {
     const list = open(d);
-    return list.length ? list.map((a) => `${a.name} (${a.kind}): ${eur(balanceOf(d, a))}${a.kind !== 'spending' ? ` (as he last told you, ${a.date})` : ''}`).join('\n') + `\nIn all: ${eur(list.reduce((s, a) => s + balanceOf(d, a), 0))}.` : 'No accounts yet. Ask him what he has (account_set).';
+    return list.length ? list.map((a) => `${a.name} (${a.kind}${a.card ? ', his card' : ''}): ${eur(balanceOf(d, a))}`).join('\n') + `\nIn all: ${eur(list.reduce((s, a) => s + balanceOf(d, a), 0))}.` : 'No accounts yet. Ask him what he has (account_set).';
   }
   if (act === 'account_remove') {
     const acc = a.id ? d.accounts.find((x) => x.id === Number(a.id) && x.active !== false) : findAccount(d, a.name);
@@ -216,7 +263,8 @@ function moneyTool(a) {
   if (act === 'income') {
     const amount = money(a.amount);
     if (!(amount > 0)) return 'Error: amount must be positive.';
-    const acc = a.account ? findAccount(d, a.account) : spendingAccount(d);
+    let acc = a.account ? findAccount(d, a.account) : spendingAccount(d);
+    if (a.account && acc && !saidAccount(acc, ctx?.userText)) acc = spendingAccount(d) || acc;
     if (!acc) return a.account ? `Error: no account called "${a.account}".` : 'Error: set up his accounts first (account_set).';
     const date = a.date && isDate(a.date) ? a.date : today();
     const i = { id: nextId(d.income), amount, account: acc.id, note: String(a.note || '').trim().slice(0, 200), date, at: Date.now() };
@@ -316,19 +364,21 @@ export const FINANCE_TOOLS = {
         'bill_add = a subscription or recurring bill (name, amount, every: week / month / 2 months / 3 months / 6 months / year, next_due YYYY-MM-DD, category, log "auto" to log it on the day or "ask" for bills that vary). ' +
         'bills = list them. bill_edit / bill_cancel = by id or name. bill_paid = log a bill now (amount if it differed). ' +
         "Accounts: account_set = what's in an account now (name, amount, kind spending / savings / investing; new name = new account); accounts = balances; account_remove. " +
-        "Spending comes off his spending account (Bank) unless he names another (account). income = money he received (amount, note, account; default his spending account). " +
-        "transfer = he moved money between his accounts (from, to, amount). Savings and investing keep the value he last gave you: when he tells you a new value, account_set it. " +
+        "Spending comes off the account his card is on unless he says cash (account 'cash') or names another; account 'card' = his card's account. Pass account ONLY when this message says how he paid (cash, card, an account name); never carry it over from an earlier message - left out, it's his card. card = which account his card is on (account). income = money he received (amount, note, account; default his card's account). " +
+        "transfer = he moved money between his accounts (from, to, amount). " +
+        "add / take = put money into or take it out of one account (account, amount, note), e.g. 'add 20 to my cash', 'take 50 out of savings' - not spending (that's spend) and not pay (that's income). " +
+        "account_set is only for 'X is now N' (the new total, never the difference). Savings and investing keep the value he last gave you. " +
         "You don't track markets or give investment advice. " +
         "Log only what he actually tells you he spent; if a receipt or amount is unclear, ask before logging. Pass any budget warning on to him.",
       parameters: { type: 'object', properties: {
-        action: { type: 'string', enum: ['spend', 'list', 'edit', 'delete', 'summary', 'budget', 'bill_add', 'bills', 'bill_edit', 'bill_cancel', 'bill_paid', 'account_set', 'accounts', 'account_remove', 'income', 'transfer'] },
+        action: { type: 'string', enum: ['spend', 'list', 'edit', 'delete', 'summary', 'budget', 'bill_add', 'bills', 'bill_edit', 'bill_cancel', 'bill_paid', 'account_set', 'accounts', 'account_remove', 'income', 'transfer', 'add', 'take', 'card'] },
         account: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' }, kind: { type: 'string', enum: KINDS },
         amount: { type: 'number' }, category: { type: 'string' }, note: { type: 'string' }, date: { type: 'string' }, month: { type: 'string' },
         id: { type: 'number' }, name: { type: 'string' }, every: { type: 'string', enum: Object.keys(EVERY) }, next_due: { type: 'string' },
         log: { type: 'string', enum: ['auto', 'ask'] }, source: { type: 'string', enum: ['chat', 'receipt'] },
       }, required: ['action'] },
     } },
-    run: moneyTool,
+    run: (args, ctx) => moneyTool(args, ctx),
   },
 };
 
@@ -392,9 +442,10 @@ export function financeView(month = monthOf(today())) {
     expenses: d.expenses.filter((e) => monthOf(e.date) === month).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id),
     byCategory: by, total, lastMonth: totals(d, prevMonth(month)).total, history: last6,
     budgets: d.budgets, bills: d.bills.filter((b) => b.active).sort((a, b) => a.nextDue.localeCompare(b.nextDue)),
-    accounts: open(d).map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: balanceOf(d, a), date: a.date })), kinds: KINDS,
+    accounts: open(d).map((a) => ({ id: a.id, name: a.name, kind: a.kind, card: Boolean(a.card), balance: balanceOf(d, a), date: a.date })), kinds: KINDS,
     income: d.income.filter((i) => monthOf(i.date) === month).sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id).map((i) => ({ ...i, accountName: accountName(d, i.account) })),
     transfers: d.transfers.filter((t) => monthOf(t.date) === month).map((t) => ({ ...t, fromName: accountName(d, t.from), toName: accountName(d, t.to) })),
+    adjustments: d.adjustments.filter((x) => monthOf(x.date) === month).map((x) => ({ ...x, accountName: accountName(d, x.account) })),
   };
 }
 // edits from the page go through the same checks as her tool
@@ -406,6 +457,7 @@ export function financeEdit(kind, op, id, body = {}) {
     account: { add: 'account_set', edit: 'account_set', delete: 'account_remove' },
     income: { add: 'income', delete: 'income_delete' },
     transfer: { add: 'transfer', delete: 'transfer_delete' },
+    adjust: { add: 'add', take: 'take', delete: 'adjust_delete' },
   };
   const action = map[kind]?.[op];
   if (!action) throw Object.assign(new Error('unknown edit'), { status: 400 });

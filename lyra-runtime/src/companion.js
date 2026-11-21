@@ -398,7 +398,9 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // Lookups she must actually make when the plan picks them: his money and his files. Answering those from the
   // conversation ("I don't have your balances saved") was wrong once and then repeated (2026-11-21).
   const LOOKUPS = ['money', 'documents'];
-  const mustCall = !cue && plan.tools.length === 1 && LOOKUPS.includes(plan.tools[0]) ? plan.tools[0] : null;
+  // (also when the plan has another tool beside it: "spent 20 on fuel" + a check-in once skipped the money call
+  // and claimed it was logged)
+  const mustCall = cue ? null : plan.tools.find((n) => LOOKUPS.includes(n)) || null;
   const chatOpts = {
     onSentence,
     tools,
