@@ -313,7 +313,7 @@ new GLTFLoader().load(MODEL, (g) => {
       else if (/Occlusion|Tearline|Scalp|BabyHair|^Cap|EyeAO/i.test(n)) { mt.transparent = true; mt.depthWrite = false; mt.alphaTest = 0; } // soft layers blend
       else if (/Hair|Eyelash|Eyebrow|Transparency|_opacity/i.test(n)) { mt.transparent = false; mt.alphaTest = 0.4; mt.side = THREE.DoubleSide; } // hair cards: cut out
       else { mt.transparent = false; mt.alphaTest = 0; mt.opacity = 1; mt.depthWrite = true; } // skin, clothes, shoes: solid
-      if (/^Lyra(Top|Trousers)/.test(n)) mt.side = THREE.DoubleSide; // her made garments: no see-through gaps
+      if (/^Lyra(Top|Trousers)|^avaturn_look/.test(n)) mt.side = THREE.DoubleSide; // her garments: the inside is drawn too (no see-through gaps)
     }
     patch(o.material, mode);
     o.userData.mode = mode;

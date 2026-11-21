@@ -181,6 +181,105 @@ if OUTFIT != 'original':
         recolour(shoes, [(list(shoes.data.polygons), SHOES, 0.5, 0.6)])
 
 
+# ---------- a body inside her clothes (Chris, 2026-11-21: "add the athlete girl inside as a body") ----------
+# Avaturn removes the skin the outfit covers, so she's hollow from the chest to the knees. Rocketbox's Sports_Female_01
+# fills it: only her torso and thighs (Lyra's own head, arms and lower legs stay), lined up to Lyra's hips, knees and
+# neck, pushed in wherever it would poke through the clothes, moving with the clothes' bone weights, a plain dark teal.
+ATHLETE = os.environ.get('LYRA_FILL', r'D:/microsoft avatar and animations/Assets/Avatars/Professions/Sports_Female_01/Export/Sports_Female_01.fbx')
+look = bpy.data.objects.get('avaturn_look_0')
+if OUTFIT != 'original' and look and os.path.exists(ATHLETE):
+    from mathutils import Vector, kdtree
+    from mathutils.bvhtree import BVHTree
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.fbx(filepath=ATHLETE)
+    new = [o for o in bpy.data.objects if o not in before]
+    arm = next(o for o in new if o.type == 'ARMATURE')
+    src = next(o for o in new if o.type == 'MESH')
+    bpy.context.view_layer.update()
+    bz = lambda n: (arm.matrix_world @ arm.data.bones[n].head_local).z
+    lz = lambda n: (rig.matrix_world @ rig.data.bones[n].head_local).z
+    # athlete heights -> Lyra heights, in pieces: ground, knee, hips, neck
+    A = [0.0, bz('Bip01 L Calf'), bz('Bip01 Pelvis'), bz('Bip01 Neck')]
+    L = [0.0, lz('bone_EXP_L1_Leg2Twist1'), lz('bone_Root'), lz('bone_EXP_C1_Neck1')]
+    mz = lambda z: float(np.interp(z, A, L, left=0.0, right=L[-1] + (z - A[-1]) * (L[-1] - L[-2]) / (A[-1] - A[-2])))
+    me = src.data.copy()
+    me.transform(src.matrix_world)
+    toes = [v.co.y for v in me.vertices if v.co.z < 0.04]
+    flip = sum(toes) / len(toes) > 0  # Lyra faces -y
+    for v in me.vertices:
+        x, y, z = v.co
+        if flip:
+            x, y = -x, -y
+        v.co = Vector((x, y, mz(z)))
+    for o in new:
+        bpy.data.objects.remove(o)
+    # only the torso and thighs
+    knee, neck = L[1], L[3]
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.verts.ensure_lookup_table()
+    gone = [v for v in bm.verts if v.co.z < knee - 0.04 or v.co.z > neck - 0.07 or abs(v.co.x) > 0.205]  # her own skin covers the shoulders and upper chest  # wider than her hips: the athlete's arms and hands
+    bmesh.ops.delete(bm, geom=gone, context='VERTS')
+    bm.to_mesh(me)
+    bm.free()
+    # inside the clothes: wherever it reaches the fabric, it moves 8 mm under it
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    cl = look.evaluated_get(dg)
+    cm = cl.to_mesh()
+    cm.transform(look.matrix_world)
+    bvh = BVHTree.FromPolygons([v.co.copy() for v in cm.vertices], [tuple(p.vertices) for p in cm.polygons])
+    pushed = 0
+    for v in me.vertices:
+        hit, nrm, _, dist = bvh.find_nearest(v.co)
+        if hit is None:
+            continue
+        if nrm.dot(v.co - hit) > -0.012 and dist < 0.08:
+            v.co = hit - nrm * 0.012
+            pushed += 1
+    cl.to_mesh_clear()
+    # a copy of the clothes object (same rig binding, which the exporter keeps), with the body's shape swapped in;
+    # the shape is in world space, so it goes into the clothes' own space first
+    me.transform(look.matrix_world.inverted())
+    fill = look.copy()
+    fill.name = 'LyraFill'
+    fill.data = me
+    for c in look.users_collection:
+        c.objects.link(fill)
+    # the athlete's own bone groups (Bip01 ...) go; Lyra's clothes' groups take their places, in the same order
+    fill.vertex_groups.clear()
+    for vg in look.vertex_groups:
+        fill.vertex_groups.new(name=vg.name)
+    # each vertex moves like the nearest point of the clothes, leaving out the sleeves (the body has no arms; a sleeve's
+    # weights would drag the armpits down with her hands)
+    import re
+    armish = {vg.index for vg in look.vertex_groups if re.search(r'Arm|Elbow|Hand|Finger|Thumb|Index|Ring|Pinky|Middle', vg.name)}
+    # and the legs only from the trousers (the top's hem follows the hips, not the thighs)
+    def tree(vs):
+        t = kdtree.KDTree(len(vs))
+        for v in vs:
+            t.insert(look.matrix_world @ v.co, v.index)
+        t.balance()
+        return t
+    torso = [v for v in look.data.vertices if sum(g.weight for g in v.groups if g.group in armish) < 0.05]
+    legs = tree([v for v in torso if (look.matrix_world @ v.co).z < L[2] + 0.09])  # the top is cut above this
+    body = tree(torso)
+    for v in me.vertices:
+        w = look.matrix_world @ v.co
+        _, i, _ = (legs if w.z < L[2] else body).find(w)
+        for g in look.data.vertices[i].groups:
+            fill.vertex_groups[g.group].add([v.index], g.weight, 'REPLACE')
+    me.materials.clear()
+    m = bpy.data.materials.new('LyraFill')
+    m.use_nodes = True
+    m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = (*PANTS, 1)
+    m.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.9
+    me.materials.append(m)
+    for p in me.polygons:
+        p.material_index = 0
+    print(f'Lyra body inside: {len(me.vertices)} vertices, {pushed} pushed under the clothes')
+
+
 def export(path):
     # only what she actually wears: the avatar also carries hidden default clothes (outside the view layer)
     vl = bpy.context.view_layer
