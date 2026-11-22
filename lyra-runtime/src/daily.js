@@ -178,8 +178,9 @@ async function shiftsFromPhoto(d, { id, name }) {
     const names = rows.map((l) => cells(l)[0]).filter((n) => n && /\p{L}/u.test(n) && !/total|signation|gnation/i.test(n));
     return `Error: "${who}" isn't on that schedule. Names on it: ${names.slice(0, 40).join(', ') || 'none readable'}. Ask him which one he is (then shifts name, and from_photo again).`;
   }
-  const nameFound = cells(mine[0])[0];
-  if (!d.scheduleName) d.scheduleName = nameFound.slice(0, 60);
+  // the name as he gave it (her eyes sometimes misspell it a little); what's on the rota only when none is saved
+  if (!d.scheduleName) d.scheduleName = cells(mine[0])[0].slice(0, 60);
+  const nameFound = d.scheduleName;
   const added = [];
   for (const col of cols) {
     // a split row (the same person twice): the first one with a shift that day

@@ -141,7 +141,10 @@ export async function readAttachments(message, { owner, conversation }) {
         const buf = await download(att);
         const mime = type.split(';')[0] || 'image/jpeg';
         const seen = await lookAt(buf, mime, question);
-        said.push('(sent a photo)');
+        // What she saw goes into his message itself, not only her background notes (2026-11-23: with her own
+        // "I can't read text from photos" earlier in the chat, she repeated that and ignored the notes). It's kept in
+        // the chat history that way too, so later questions about the photo have it.
+        let photoLine = `(sent a photo. What you see in it, with your own eyes: ${seen.replace(/\s+/g, ' ').slice(0, 700)})`;
         if (owner) {
           // kept: the picture itself and what she saw (so a search finds it), for questions about it later
           const id = nextId();
@@ -157,11 +160,14 @@ export async function readAttachments(message, { owner, conversation }) {
               schedule = r.startsWith('Error') ? `You couldn't find him on it yet: ${r.replace(/^Error:\s*/, '')}` : `Chris IS on it (the name on the rota is how his own name is written there), and you've already read his shifts off it and saved them: ${r}`;
             } catch (err) { schedule = `Reading his shifts failed (${err.message}); tell him.`; }
           }
+          if (schedule) photoLine = photoLine.replace(/\)$/, ` It's his work schedule: ${schedule.replace(/ They're saved: don't add them again\..*$/, '')} You can read text in photos.)`);
+          said.push(photoLine);
           extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +
             `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.` +
             (schedule ? `\nIt's his work schedule. ${schedule}` : '') +
             `\nIf it's a receipt or a bill, offer to log it with your money tool (shop, total, date, a category) and log it once he says yes (source receipt); if the total isn't clear, look again or ask.`);
         } else {
+          said.push(photoLine);
           extra.push(`They sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
         }
       } else if (TEXT_EXT.test(att.name) || DOC_EXT.test(att.name)) {
