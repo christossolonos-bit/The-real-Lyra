@@ -54,7 +54,10 @@ let weatherCache = { at: 0, key: '', text: '' };
 async function findTown(name) {
   const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=5&language=en`, { signal: AbortSignal.timeout(10_000) });
   const j = await r.json();
-  const hit = (j.results || []).find((x) => x.country_code === 'CY') || j.results?.[0];
+  // a town or village (not a country or region) whose name is the one asked for; one in Cyprus first
+  const want = String(name).trim().toLowerCase();
+  const ok = (j.results || []).filter((x) => /^PPL/.test(x.feature_code || '') && String(x.name).toLowerCase().startsWith(want.slice(0, Math.max(4, want.length - 2))));
+  const hit = ok.find((x) => x.country_code === 'CY') || ok[0];
   return hit ? { name: hit.name, lat: hit.latitude, lon: hit.longitude, country: hit.country } : null;
 }
 export async function weatherLine() {
@@ -286,11 +289,38 @@ async function shiftsTool(a) {
   return 'Error: unknown action.';
 }
 
+// places named in what he said, most likely first: "I live in Paphos", "my town is Larnaca", then "... in Kyrenia"
+const NOT_PLACES = /^(a|an|the|my|your|his|her|bed|work|town|home|love|trouble|pain|charge|time|cyprus|greece|europe)\b/i;
+function townsFromWords(text) {
+  const t = String(text || '');
+  const end = String.raw`(?=[.,!?]|\s+(?:and|but|now|so|right|today|tonight|the|you|for|at|with)\b|$)`;
+  const clear = [...t.matchAll(new RegExp(String.raw`\b(?:live in|living in|i'?m in|i am in|based in|town is|city is|village is|move[ds]? to)\s+([\p{L}][\p{L}' -]{1,40}?)` + end, 'giu'))].map((m) => m[1]);
+  const named = [...t.matchAll(/\b(?:in|at|from|to)\s+(\p{Lu}[\p{L}'-]+(?:\s\p{Lu}[\p{L}'-]+)?)/gu)].map((m) => m[1]);
+  return [...new Set([...clear, ...named].map((x) => x.trim()).filter((x) => x && !NOT_PLACES.test(x)))];
+}
+async function townFromWords(text) {
+  const found = [];
+  for (const name of townsFromWords(text)) {
+    const town = await findTown(name).catch(() => null);
+    if (town) found.push(town);
+  }
+  return found.find((t) => t.country === 'Cyprus') || found[0] || null; // a Cyprus town first
+}
+
 async function dayTool(a, ctx) {
   const d = load();
+  // no town yet and his message names one: saved, whatever she called the tool for (2026-11-23: "I'm in <his town>"
+  // was answered with "I'll remember" while the town was never saved)
+  if (!d.town && a.action !== 'town') {
+    const t = await townFromWords(ctx?.userText);
+    if (t) { d.town = t; save(d); weatherCache = { at: 0, key: '', text: '' }; activity('daily', { message: `Saved his town: ${t.name}` }); }
+  }
   if (a.action === 'town') {
-    const town = await findTown(String(a.name || '').trim()).catch(() => null);
-    if (!town) return `Error: couldn't find a town called "${a.name}".`;
+    // the town in whichever field she put it, or from his own words (she once sent it in another field, the tool
+    // got an empty name, and the town was never saved)
+    const wanted = [a.town, a.name, a.city, a.place, a.location].map((x) => String(x || '').trim()).find(Boolean);
+    const town = (wanted && await findTown(wanted).catch(() => null)) || await townFromWords(ctx?.userText);
+    if (!town) return wanted ? `Error: couldn't find a town called "${wanted}". Ask him how it's spelled.` : "Error: which town? Pass it as town (e.g. town: 'Paphos').";
     d.town = town;
     save(d);
     weatherCache = { at: 0, key: '', text: '' };
@@ -358,12 +388,12 @@ export const DAILY_TOOLS = {
     definition: { type: 'function', function: {
       name: 'day',
       description: "Chris's day. wrapup = save tonight's wrap-up after he tells you how his day went (summary in 1-3 sentences, feeling, done_todos = ids of to-dos he did). " +
-        'brief = the facts for a morning brief (say it in your own words). weather = the weather in his town. town = his town (name). ' +
+        'brief = the facts for a morning brief (say it in your own words). weather = the weather in his town. town = save his town when he tells you where he lives (town: the name of the town). ' +
         'brief_time = DM him the morning brief at a time each day (time like 08:00, or "off").',
       parameters: { type: 'object', properties: {
         action: { type: 'string', enum: ['wrapup', 'brief', 'weather', 'town', 'brief_time'] },
         summary: { type: 'string' }, feeling: { type: 'string' }, done_todos: { type: 'array', items: { type: 'number' } },
-        name: { type: 'string' }, time: { type: 'string' },
+        town: { type: 'string', description: 'His town, for town' }, name: { type: 'string' }, time: { type: 'string' },
       }, required: ['action'] },
     } },
     run: (a, ctx) => dayTool(a, ctx),
