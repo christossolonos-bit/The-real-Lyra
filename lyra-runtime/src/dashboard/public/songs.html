@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Songs</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --warn:#c27c0e; --bad:#c43c3c; --her:#7c5cff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --warn:#f0b445; --bad:#ff6b6b; --her:#a58bff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:14px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header h1 { margin:0; font-size:18px; }
+  #call { margin-left:auto; font-size:13px; color:var(--muted); }
+  #call.on { color:var(--good); }
+  main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .filters { display:flex; gap:8px; flex-wrap:wrap; }
+  .filters button { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:999px; padding:5px 12px; font:inherit; font-size:14px; cursor:pointer; }
+  .filters button.on { background:var(--accent); color:#001; border-color:var(--accent); }
+  .filters input { flex:1 1 180px; min-width:0; border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:999px; padding:5px 12px; font:inherit; font-size:14px; }
+  .song { display:grid; grid-template-columns:1fr auto; gap:6px 14px; padding:14px 0; border-bottom:1px solid var(--border); align-items:center; }
+  .song:last-child { border-bottom:0; }
+  .song .t { font-weight:600; overflow-wrap:anywhere; }
+  .song .meta { color:var(--muted); font-size:13px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .song .about { color:var(--muted); font-size:13px; grid-column:1 / -1; overflow-wrap:anywhere; }
+  .song audio { width:100%; height:36px; grid-column:1 / -1; }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .acts button { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:5px 10px; font:inherit; font-size:13px; cursor:pointer; white-space:nowrap; }
+  .acts button.primary { background:var(--accent); color:#001; border-color:var(--accent); }
+  .acts button.danger { color:var(--bad); }
+  .acts button:disabled { opacity:.45; cursor:not-allowed; }
+  .badge { font-size:11px; border-radius:6px; padding:1px 6px; border:1px solid var(--border); }
+  .badge.her { color:var(--her); border-color:var(--her); }
+  .badge.sent { color:var(--warn); border-color:var(--warn); }
+  .badge.made { color:var(--accent); border-color:var(--accent); }
+  .job { display:flex; gap:10px; align-items:center; padding:6px 0; font-size:14px; }
+  .job .state { font-size:12px; color:var(--muted); }
+  .job.done .state { color:var(--good); } .job.failed .state { color:var(--bad); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--her); animation:pulse 1.2s infinite; flex:none; }
+  .job.done .dot, .job.failed .dot { animation:none; background:currentColor; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  .empty { color:var(--muted); }
+  .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
+  .msg.show { opacity:1; }
+  @media (max-width:640px) { .song { grid-template-columns:1fr; } .acts { justify-content:flex-start; } #call { margin-left:0; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <h1>Songs</h1>
+  <span id="call">…</span>
+</header>
+<main>
+  <section class="card" id="jobsCard" hidden>
+    <h2>Singing now</h2>
+    <div id="jobs"></div>
+  </section>
+  <section class="card">
+    <div class="filters" id="filters">
+      <button data-f="all" class="on">All</button>
+      <button data-f="her">In her voice</button>
+      <button data-f="made">Made by her</button>
+      <button data-f="sent">Sent by you</button>
+      <input id="q" type="search" placeholder="Find a song" aria-label="Find a song">
+    </div>
+  </section>
+  <section class="card">
+    <h2 id="count">Songs</h2>
+    <div id="songs"></div>
+  </section>
+</main>
+<div class="msg" id="msg"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let data = { songs: [], calls: [], singing: [], herVoice: false }, filter = 'all', query = '';
+const playing = new Set(); // keep a playing <audio> alive across refreshes
+
+function toast(t) { const m = $('#msg'); m.textContent = t; m.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => m.classList.remove('show'), 3000); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const isHers = (s) => s.voice === 'lyra' || /\(lyra\)$/i.test(s.title);
+const kind = (s) => (isHers(s) ? 'her' : s.source === 'sent' ? 'sent' : s.made ? 'made' : 'library');
+const when = (t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+async function load() {
+  data = await api('GET', '/api/songs');
+  render();
+}
+
+function render() {
+  const call = data.calls[0];
+  const c = $('#call');
+  c.textContent = call ? `🔊 In a call${call.channel ? `: ${call.channel}` : ''}` : 'Not in a voice call';
+  c.className = call ? 'on' : '';
+  // songs being sung
+  const jobs = data.singing.slice().sort((a, b) => b.at - a.at);
+  $('#jobsCard').hidden = !jobs.length;
+  $('#jobs').innerHTML = jobs.map((j) => `<div class="job ${j.state}"><span class="dot"></span><span>${esc(j.title)}</span>` +
+    `<span class="state">${j.state === 'singing' ? `singing in her voice… ${Math.round((Date.now() - j.at) / 1000)} s` : j.state === 'done' ? 'done: it\'s in the list below' : `failed: ${esc(j.error || '')}`}</span></div>`).join('');
+  // the list (players that are playing stay untouched)
+  const q = query.toLowerCase();
+  const list = data.songs.filter((s) => (filter === 'all' || kind(s) === filter) && (!q || `${s.title} ${s.about}`.toLowerCase().includes(q)));
+  $('#count').textContent = `${list.length} song${list.length === 1 ? '' : 's'}`;
+  if (playing.size) return; // don't rebuild under a song that's playing
+  $('#songs').innerHTML = list.length ? list.map((s) => {
+    const k = kind(s);
+    const badge = { her: '<span class="badge her">🎤 her voice</span>', sent: '<span class="badge sent">sent by you</span>', made: '<span class="badge made">made by her</span>', library: '' }[k];
+    const singing = data.singing.some((j) => j.state === 'singing' && j.title === s.title);
+    return `<div class="song" data-file="${esc(s.file)}">
+      <div><div class="t">${esc(s.title)}</div><div class="meta">${badge}<span>${esc(when(s.at))}</span></div></div>
+      <div class="acts">
+        <button class="primary" data-act="play" ${call ? '' : 'disabled title="She isn\'t in a voice call"'}>▶ Play in call</button>
+        ${k !== 'her' ? `<button data-act="sing" ${data.herVoice && !singing ? '' : 'disabled'} title="${data.herVoice ? 'Make a version sung in her voice (a few minutes)' : 'Her singing voice is not set up'}">🎤 ${singing ? 'Singing…' : 'Sing in her voice'}</button>` : ''}
+        <button class="danger" data-act="delete">Delete</button>
+      </div>
+      ${s.about ? `<div class="about">${esc(s.about)}</div>` : ''}
+      <audio controls preload="none" src="/api/music/${encodeURIComponent(s.file)}"></audio>
+    </div>`;
+  }).join('') : '<p class="empty">No songs here yet. Ask her to make one ("make me a song about…"), or send her an MP3 on Discord.</p>';
+  for (const a of document.querySelectorAll('audio')) {
+    a.addEventListener('play', () => { for (const o of document.querySelectorAll('audio')) if (o !== a) o.pause(); playing.add(a); });
+    a.addEventListener('pause', () => playing.delete(a));
+    a.addEventListener('ended', () => playing.delete(a));
+  }
+}
+
+document.addEventListener('click', async (ev) => {
+  const f = ev.target.closest('#filters button');
+  if (f) { filter = f.dataset.f; for (const b of document.querySelectorAll('#filters button')) b.classList.toggle('on', b === f); playing.clear(); render(); return; }
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const file = btn.closest('.song').dataset.file;
+  const song = data.songs.find((s) => s.file === file);
+  try {
+    if (btn.dataset.act === 'play') toast((await api('POST', '/api/songs/play', { file, guildId: data.calls[0]?.guildId })).message);
+    if (btn.dataset.act === 'sing') { btn.disabled = true; toast((await api('POST', '/api/songs/sing', { file, playInCall: Boolean(data.calls[0]) })).message); playing.clear(); await load(); }
+    if (btn.dataset.act === 'delete') {
+      if (!confirm(`Delete "${song.title}"? It's moved to the music folder's trash, not erased.`)) return;
+      toast((await api('DELETE', `/api/songs/${encodeURIComponent(file)}`)).message); playing.clear(); await load();
+    }
+  } catch (err) { toast(err.message); btn.disabled = false; }
+});
+$('#q').addEventListener('input', (ev) => { query = ev.target.value; playing.clear(); render(); });
+
+load().catch((err) => { $('#songs').innerHTML = `<p class="empty">Couldn't load: ${esc(err.message)}</p>`; });
+// while something is being sung: check every 5 s
+setInterval(() => { if (data.singing.some((j) => j.state === 'singing') || document.visibilityState === 'visible') load().catch(() => {}); }, 5000);
+</script>
+</body>
+</html>

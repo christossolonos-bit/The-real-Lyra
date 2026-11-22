@@ -31,6 +31,9 @@ const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')
 const ANIM_DIR = path.join(DATA_DIR, 'anims');
 const startedAt = Date.now();
 
+// songs being sung in her voice from the Songs page: id -> { title, state, file }
+const songJobs = new Map();
+
 export function startDashboard(bot) {
   const routes = buildRoutes(bot);
 
@@ -509,6 +512,40 @@ function buildRoutes(bot) {
       return undefined;
     }),
     r('GET', '/api/music', () => ({ tracks: music.tracks(), playlists: music.playlists() })),
+    // The Songs page (/songs.html): her songs, played in the call or sung in her voice (2026-11-22)
+    r('GET', '/api/songs', async () => ({
+      songs: music.tracks().sort((a, b) => b.at - a.at),
+      calls: [...sessions.values()].map((s) => ({ guildId: s.guild?.id, ...s.summary() })),
+      singing: [...songJobs.values()].filter((j) => Date.now() - j.at < 30 * 60_000),
+      herVoice: (await import('../singvoice.js')).herVoiceReady(),
+    })),
+    r('POST', '/api/songs/play', ({ body }) => {
+      const t = music.tracks().find((x) => x.file === body.file);
+      if (!t) throw Object.assign(new Error('No such song'), { status: 404 });
+      const call = body.guildId ? sessions.get(body.guildId) : [...sessions.values()][0];
+      if (!call) throw Object.assign(new Error("She isn't in a voice call. Join one first (Overview)."), { status: 409 });
+      call.playMusic([t.file], { titles: { [t.file]: t.title } });
+      activity('music', { message: `Playing "${t.title}" in the call (from the Songs page)` });
+      return { ok: true, message: `Playing "${t.title}" in the call.` };
+    }),
+    r('POST', '/api/songs/sing', async ({ body }) => {
+      const { herVoiceReady, inHerVoice } = await import('../singvoice.js');
+      if (!herVoiceReady()) throw Object.assign(new Error("Her singing voice (Seed-VC) isn't set up on this PC."), { status: 409 });
+      const t = music.tracks().find((x) => x.file === body.file);
+      if (!t) throw Object.assign(new Error('No such song'), { status: 404 });
+      const id = `${Date.now()}`;
+      const title = `${t.title.replace(/\s*\(Lyra\)$/i, '')} (Lyra)`;
+      songJobs.set(id, { id, title: t.title, at: Date.now(), state: 'singing' });
+      inHerVoice(readFileSync(path.join(music.MUSIC_DIR, t.file)), { ext: path.extname(t.file).slice(1) || 'mp3' })
+        .then((buf) => {
+          const file = music.addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice`, voice: 'lyra', source: 'sung' });
+          songJobs.set(id, { ...songJobs.get(id), state: 'done', file, done: Date.now() });
+          if (body.playInCall && sessions.size) [...sessions.values()][0].playMusic([file], { titles: { [file]: title } });
+        })
+        .catch((err) => songJobs.set(id, { ...songJobs.get(id), state: 'failed', error: err.message.slice(0, 200) }));
+      return { ok: true, message: `Singing "${t.title}" in her voice: it takes about 2.6x the song's length.` };
+    }),
+    r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
     r('GET', '/api/pressure', () => pressure.snapshot()),
 
     // Video replies: the recorder page's event stream, its "recording started", and the clip itself.

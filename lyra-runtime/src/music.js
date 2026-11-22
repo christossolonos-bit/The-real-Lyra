@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
 
@@ -28,21 +28,35 @@ export function tracks() {
   const info = readJson(INFO_FILE, {});
   return readdirSync(MUSIC_DIR)
     .filter((f) => AUDIO.test(f) && statSync(path.join(MUSIC_DIR, f)).isFile())
-    .map((file) => ({ file, title: info[file]?.title || titleFromFile(file), about: info[file]?.about || '', made: Boolean(info[file]) }))
+    .map((file) => ({ file, title: info[file]?.title || titleFromFile(file), about: info[file]?.about || '', made: Boolean(info[file]), voice: info[file]?.voice || '', source: info[file]?.source || (info[file] ? 'made' : 'library'), at: info[file]?.at || statSync(path.join(MUSIC_DIR, file)).mtimeMs }))
     .sort((a, b) => a.title.localeCompare(b.title));
 }
 
 // Saves a song she made under a readable, unique file name. Returns the file name.
-export function addSong(bytes, { title, about }) {
+export function addSong(bytes, { title, about, voice = '', source = 'made' }) {
   mkdirSync(MUSIC_DIR, { recursive: true });
   const slug = String(title || 'song').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'song';
   let file = `${slug}.mp3`;
   for (let n = 2; existsSync(path.join(MUSIC_DIR, file)); n++) file = `${slug}-${n}.mp3`;
   writeFileSync(path.join(MUSIC_DIR, file), bytes);
   const info = readJson(INFO_FILE, {});
-  info[file] = { title: title || titleFromFile(file), about, at: Date.now() };
+  info[file] = { title: title || titleFromFile(file), about, at: Date.now(), ...(voice ? { voice } : {}), source };
   writeFileSync(INFO_FILE, JSON.stringify(info, null, 2));
   return file;
+}
+
+// A song taken off the Songs page: moved to data/music/.trash (not deleted), out of the library
+export function trashSong(file) {
+  const abs = path.resolve(MUSIC_DIR, file);
+  if (!abs.startsWith(path.resolve(MUSIC_DIR) + path.sep) || !existsSync(abs)) throw Object.assign(new Error('No such song'), { status: 404 });
+  const trash = path.join(MUSIC_DIR, '.trash');
+  mkdirSync(trash, { recursive: true });
+  renameSync(abs, path.join(trash, `${Date.now()}-${path.basename(file)}`));
+  const info = readJson(INFO_FILE, {});
+  const title = info[file]?.title || titleFromFile(file);
+  delete info[file];
+  writeFileSync(INFO_FILE, JSON.stringify(info, null, 2));
+  return title;
 }
 
 // Strip spoken/typed filler around a song ask ("hey luna can you play … please").

@@ -1088,6 +1088,13 @@ async function makeMusic({ prompt, length, title, voice }, ctx) {
   return `The ${full ? 'song' : '30-second clip'} is done and now playing in the chat.${voiceNote}${words} Say something short about it; don't read out all the lyrics.`;
 }
 
+// In a voice call: the song plays there too (2026-11-22: "i can ask her to sing in the call")
+function playInCall(ctx, file, title) {
+  const call = ctx.voice;
+  if (!call?.playMusic || !String(ctx.conversation || '').startsWith('voice')) return false;
+  try { call.playMusic([file], { titles: { [file]: title } }); return true; } catch { return false; }
+}
+
 // Posting a song minutes after her reply (2026-11-22: sendHere only adds a file to the reply being written, or in a
 // call takes a file and nothing else, so a finished song posted through it failed). In a Discord chat or call: that
 // channel; anywhere else (the dashboard page may be closed by then): a DM to Chris.
@@ -1103,10 +1110,14 @@ async function postLater(ctx, note, buf, name) {
 // A song with her voice put on it takes minutes, so it's done in the background and posted here when ready
 // (her singing voice, singvoice.js). If her voice can't be put on it, the original is posted instead.
 function singInBackground(bytes, { title, about, ctx, lyrics = '', full = true }) {
-  const share = async (buf, note) => postLater(ctx, note, buf, addSong(buf, { title, about }));
+  const share = async (buf, note, hers = false) => {
+    const name = addSong(buf, { title, about, voice: hers ? 'lyra' : '' });
+    playInCall(ctx, name, title);
+    return postLater(ctx, note, buf, name);
+  };
   // the original only when her voice couldn't be put on it (not when posting failed)
   inHerVoice(bytes)
-    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`), (err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
+    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`, true), (err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
     .catch((err) => activity('error', { where: 'singing', message: `posting "${title}": ${err.message}` }));
   const words = lyrics && lyrics !== '<instrumental>' ? ` Its lyrics: ${lyrics.slice(0, 800)}` : '';
   return `The ${full ? 'song' : 'clip'} is made, and you're now singing it in your own voice: that takes ${full ? 'about 8 minutes' : 'a minute or two'}, and it'll be posted here when it's ready. Tell him that, briefly.${words}`;
@@ -1115,11 +1126,20 @@ function singInBackground(bytes, { title, about, ctx, lyrics = '', full = true }
 // "Sing Seven Little Buckets": a song from her music library, sung in her own voice (a new track, "... (Lyra)")
 async function singSongTool({ track, start = 0, length = 0 }, ctx) {
   if (!herVoiceReady()) return "Error: your singing voice (Seed-VC) isn't set up on this PC.";
+  // her version already exists: play it in the call / post it, no need to sing it again
+  const mine = findTrack(`${String(track).replace(/\s*\(lyra\)\s*$/i, '')} (Lyra)`);
+  if (mine && /\(lyra\)$/i.test(mine.title)) {
+    if (playInCall(ctx, mine.file, mine.title)) return `Your version, "${mine.title}", is already made: it's playing in the call now. Tell him, briefly.`;
+  }
   const t = findTrack(track);
   if (!t) return `Error: no song like "${track}" in your music library. Songs: ${tracks().slice(0, 25).map((x) => x.title).join(', ')}.`;
   const bytes = readFileSync(path.join(MUSIC_DIR, t.file));
   const title = `${t.title.replace(/\s*\(Lyra\)$/i, '')} (Lyra)`;
-  const share = async (buf, note) => postLater(ctx, note, buf, addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice` }));
+  const share = async (buf, note) => {
+    const name = addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice`, voice: 'lyra', source: 'sung' });
+    playInCall(ctx, name, title);
+    return postLater(ctx, note, buf, name);
+  };
   inHerVoice(bytes, { ext: path.extname(t.file).slice(1) || 'mp3', start: Number(start) || 0, length: Number(length) || 0 })
     .then((hers) => share(hers, `🎤 "${t.title}", sung in my voice.`))
     .catch((err) => { activity('error', { where: 'singing', message: err.message }); return postLater(ctx, `I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })

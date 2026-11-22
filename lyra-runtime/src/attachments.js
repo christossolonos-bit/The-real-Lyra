@@ -129,7 +129,7 @@ export async function readAttachments(message, { owner, conversation }) {
         const { addSong } = await import('./music.js');
         const title = path.basename(att.name).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 60) || 'song';
         const buf = await download(att);
-        const file = addSong(buf, { title, about: `a song Chris sent on ${momentLabel()}` });
+        const file = addSong(buf, { title, about: `a song Chris sent on ${momentLabel()}`, source: 'sent' });
         said.push(`(sent the song "${title}")`);
         extra.push(`Chris sent a song file: "${title}", now in your music library (${file}). If he wants you to sing it in your own voice, use your sing_song tool (track "${title}"); otherwise you can play it.`);
         activity('music', { message: `Saved "${title}" from Chris to the music library` });
