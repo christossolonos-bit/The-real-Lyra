@@ -151,7 +151,7 @@ export async function readAttachments(message, { owner, conversation }) {
           const doc = keep(att, `[photo] What Lyra saw when Chris sent it: ${seen}`, conversation, { id, kind: 'image', file, mime });
           // a work schedule: his row is read straight away (daily.js), so his shifts are saved without him asking
           let schedule = '';
-          if (/\b(rota|schedule|shifts?|timetable|roster)\b/i.test(seen)) {
+          if (/\b(rotas?|schedules?|shifts?|timetables?|rosters?|time ?sheets?|staff (list|hours|sheet)|shift hours|working hours)\b/i.test(seen)) {
             try {
               const r = await (await import('./daily.js')).readSchedule(doc.id);
               schedule = r.startsWith('Error') ? `You couldn't find him on it yet: ${r.replace(/^Error:\s*/, '')}` : `Chris IS on it (the name on the rota is how his own name is written there), and you've already read his shifts off it and saved them: ${r}`;
@@ -298,6 +298,12 @@ async function documentsTool({ action, id = 0, name = '', query = '', part = 0, 
   const list = index();
   if (action === 'search') return searchDocuments({ id, name, query });
   if (action === 'look') return lookAgain(list, { id, name, page, question: question || query });
+  // a photo has no text of its own beyond what she saw: reading it means looking again (2026-11-23: she read the
+  // short description, then told him she can't read text in photos)
+  if (action === 'read' || action === 'search') {
+    const pic = list.find((d) => d.id === Number(id) && d.kind === 'image') || (!id && !name && action === 'read' && list.at(-1)?.kind === 'image' && list.at(-1));
+    if (pic) return lookAgain(list, { id: pic.id, question: question || query || 'Describe everything visible, and read out all the text in it.' });
+  }
   if (action === 'list') return list.length ? list.slice(-20).map((d) => `#${d.id} "${d.name}" ${d.kind === 'image' ? 'photo' : `${d.words} words${d.pages ? `, ${d.pages} pages` : ''}`} (${d.when})`).join('\n') : 'No files yet.';
   const doc = list.find((d) => d.id === Number(id)) || (name && [...list].reverse().find((d) => d.name.toLowerCase().includes(String(name).toLowerCase()))) || list.at(-1);
   if (!doc) return 'Error: no such file. Use list.';

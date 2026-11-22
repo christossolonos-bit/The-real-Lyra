@@ -138,13 +138,22 @@ function headerDate(cell, t) {
   }
   return null;
 }
-// a cell to a shift: "14:00-23:00", "7-15", "15:00-24:00"; DO / OFF / empty is a day off
+// a cell to a shift: "14:00-23:00", "18-02", "15:00-24:00"; DO / OFF / x / empty is a day off.
+// Handwritten rotas use short 12-hour times (like "10-6", "3-11", "8-4", with "22-6" written for nights):
+// with no minutes and both hours 12 or under, a start of 1 to 5 is the afternoon, and an end before the start is
+// the same afternoon or evening ("8-5" = 08:00-17:00, "2-11" = 14:00-23:00, "6-2" = 06:00-14:00).
 function cellShift(cell) {
   const c = String(cell || '').trim();
-  const m = c.match(/(\d{1,2})(?:[:.](\d{2}))?\s*[-–to]+\s*(\d{1,2})(?:[:.](\d{2}))?/i);
+  const m = c.match(/(\d{1,2})(?:[:.](\d{2}))?\s*(?:-|–|to)\s*(\d{1,2})(?:[:.](\d{2}))?/i);
   if (!m) return null;
-  const t = (h, mm) => { const H = Number(h) % 24; return `${pad(H)}:${mm || '00'}`; };
-  return { start: t(m[1], m[2]), end: t(m[3], m[4]) };
+  let a = Number(m[1]), b = Number(m[3]);
+  const short = !m[2] && !m[4] && !/^0/.test(m[1]) && !/^0/.test(m[3]) && a <= 12 && b <= 12;
+  if (short) {
+    if (a >= 1 && a <= 5) a += 12;
+    if (b <= a % 24 && b + 12 > a && b + 12 <= 24) b += 12;
+  }
+  const t = (h, mm) => `${pad(h % 24)}:${mm || '00'}`;
+  return { start: t(a, m[2]), end: t(b, m[4]) };
 }
 
 async function shiftsFromPhoto(d, { id, name }) {
