@@ -102,34 +102,86 @@ function addShift(d, { date, start, end, note = '', source = 'chat' }) {
 }
 
 // read his row off a photo of the work schedule
-async function shiftsFromPhoto(d, { id, name, retried = false }) {
+// Reading a schedule (2026-11-22): asked for one person's row, the vision model slipped to the row above on a
+// dense, tilted rota (and did so every time). Copying the whole table line by line keeps the rows straight, so she
+// transcribes it, and his row, the dates and the times are picked out here in code.
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const nameWords = (x) => String(x).toLowerCase().split(/[^\p{L}]+/u).filter((w) => w.length > 1 || /^\p{L}$/u.test(w));
+// every word of his name has to match a word of theirs ("Andreas Petrou" never matches "Andronikos Pavlou";
+// a short "Andre" matches "Andreas"; a misspelt "Petrouu" still matches "Petrou")
+const wordFits = (a, b) => a === b || (a.startsWith(b.slice(0, 4)) && (b.length <= 5 || a.startsWith(b) || b.startsWith(a) || Math.abs(a.length - b.length) <= 1));
+const nameMatches = (who, n) => nameWords(who).every((w) => nameWords(n).some((x) => wordFits(x, w) || wordFits(w, x)));
+// a header cell to a date: "Mon 16- Nov", "16/11", "Mon"
+function headerDate(cell, t) {
+  const c = String(cell).toLowerCase();
+  const dayName = DAYS.findIndex((x) => c.includes(x));
+  const num = c.match(/\b(\d{1,2})\s*[-/. ]?\s*(\d{1,2})?\b/);
+  const mon = MONTHS.findIndex((m) => c.includes(m));
+  const today = new Date(`${t}T12:00`);
+  if (num && (mon >= 0 || num[2])) {
+    const day = Number(num[1]), month = mon >= 0 ? mon : Number(num[2]) - 1;
+    // the year that puts it nearest today (a rota across New Year)
+    const options = [-1, 0, 1].map((k) => new Date(today.getFullYear() + k, month, day, 12));
+    const best = options.sort((a, b) => Math.abs(a - today) - Math.abs(b - today))[0];
+    return day >= 1 && day <= 31 ? dayOf(best) : null;
+  }
+  if (dayName >= 0) {
+    // weekdays only: this week (Monday to Sunday), or next week once this one is over
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const offset = (dayName + 6) % 7;
+    return dayOf(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + offset, 12));
+  }
+  return null;
+}
+// a cell to a shift: "14:00-23:00", "7-15", "15:00-24:00"; DO / OFF / empty is a day off
+function cellShift(cell) {
+  const c = String(cell || '').trim();
+  const m = c.match(/(\d{1,2})(?:[:.](\d{2}))?\s*[-–to]+\s*(\d{1,2})(?:[:.](\d{2}))?/i);
+  if (!m) return null;
+  const t = (h, mm) => { const H = Number(h) % 24; return `${pad(H)}:${mm || '00'}`; };
+  return { start: t(m[1], m[2]), end: t(m[3], m[4]) };
+}
+
+async function shiftsFromPhoto(d, { id, name }) {
   const { lookAtKept } = await import('./attachments.js');
   const who = String(name || d.scheduleName || '').trim();
   if (!who) return "Error: which name is he under on the schedule? Ask him once (it's saved for next time), then try again with name.";
   const t = dayOf();
-  const prompt = `This is a work schedule (rota). Find the row or column for "${who}" (it may be written as a first name, a short form or initials). ` +
-    `Today is ${weekday(t)} ${t}. For each day on the schedule, give that person's shift. Work out each day's real date (YYYY-MM-DD): if the schedule shows dates, use them; if it only shows weekdays, it's the week that contains today, or the next week if that one is already over. ` +
-    `Times in 24-hour HH:MM. Leave out days off. Reply with JSON only: {"found": true, "name_on_schedule": "...", "shifts": [{"date": "YYYY-MM-DD", "start": "HH:MM", "end": "HH:MM"}]} or {"found": false, "names": ["the names you can see"]}.`;
-  const raw = await lookAtKept(id, prompt, 900);
-  let j;
-  try { j = JSON.parse(String(raw).replace(/^[^{]*/, '').replace(/[^}]*$/, '')); } catch { return `Error: couldn't read the schedule clearly. What she saw: ${String(raw).slice(0, 400)}`; }
-  if (!j.found && !retried) {
-    const w = who.toLowerCase();
-    const near = (j.names || []).find((n) => { const x = String(n).toLowerCase(); return x.startsWith(w.slice(0, 4)) || w.startsWith(x.slice(0, 4)); });
-    if (near) return shiftsFromPhoto(d, { id, name: near, retried: true });
+  const raw = await lookAtKept(id, 'This is a work rota. Transcribe the table exactly, one line per person, in the order they appear top to bottom: NAME | day1 | day2 | ... using the cell text (times like 14:00-23:00, or DO). Keep empty cells as empty between the bars. First line: the day headers, with the same columns. Plain text only, no commentary.', 4000);
+  const lines = String(raw).split('\n').map((l) => l.trim()).filter((l) => l.includes('|'));
+  const cells = (l) => l.replace(/^\||\|$/g, '').split('|').map((x) => x.trim());
+  const headerLine = lines.find((l) => cells(l).filter((c) => DAYS.some((x) => c.toLowerCase().includes(x))).length >= 3);
+  if (!headerLine) return `Error: couldn't make out the days on the schedule. What she saw: ${String(raw).slice(0, 300)}`;
+  const header = cells(headerLine);
+  const cols = header.map((c, i) => ({ i, date: DAYS.some((x) => c.toLowerCase().includes(x)) ? headerDate(c, t) : null })).filter((c) => c.date);
+  // weekday names only, and most of that week already gone (a rota for next week, sent at the weekend): next week
+  if (cols.length && cols.every((c) => !/\d/.test(header[c.i])) && cols.filter((c) => c.date < t).length * 2 > cols.length) {
+    for (const c of cols) c.date = addDays(c.date, 7);
   }
-  if (!j.found) return `Error: "${who}" isn't on that schedule. Names on it: ${(j.names || []).join(', ') || 'none readable'}. Ask him which one he is (then shifts from_photo with that name).`;
-  if (j.name_on_schedule) d.scheduleName = String(j.name_on_schedule).slice(0, 60);
+  const rows = lines.filter((l) => l !== headerLine && !/^name\b/i.test(l));
+  const mine = rows.filter((l) => nameMatches(who, cells(l)[0]));
+  if (!mine.length) {
+    const names = rows.map((l) => cells(l)[0]).filter((n) => n && /\p{L}/u.test(n) && !/total|signation|gnation/i.test(n));
+    return `Error: "${who}" isn't on that schedule. Names on it: ${names.slice(0, 40).join(', ') || 'none readable'}. Ask him which one he is (then shifts name, and from_photo again).`;
+  }
+  const nameFound = cells(mine[0])[0];
+  if (!d.scheduleName) d.scheduleName = nameFound.slice(0, 60);
   const added = [];
-  for (const s of j.shifts || []) {
-    const r = addShift(d, { date: s.date, start: s.start, end: s.end, source: 'schedule photo' });
+  for (const col of cols) {
+    // a split row (the same person twice): the first one with a shift that day
+    const shift = mine.map((l) => cellShift(cells(l)[col.i])).find(Boolean);
+    if (!shift) { d.shifts = d.shifts.filter((x) => !(x.date === col.date && x.source === 'schedule photo')); continue; }
+    const r = addShift(d, { date: col.date, start: shift.start, end: shift.end, source: 'schedule photo' });
     if (typeof r !== 'string') added.push(r);
   }
   save(d);
-  activity('daily', { message: `Read ${added.length} shifts for ${j.name_on_schedule || who} off the schedule photo` });
+  activity('daily', { message: `Read ${added.length} shifts for ${nameFound} off the schedule photo` });
+  const past = added.filter((x) => x.date < t).length;
   return added.length
-    ? `Read and saved ${added.length} shifts for "${j.name_on_schedule || who}": ${added.map(shiftLine).join('; ')}. They're saved: don't add them again. Read them back to him briefly, in these exact times, so he can correct anything.`
-    : `Found "${j.name_on_schedule || who}" but no shifts (all days off?). Tell him what you saw.`;
+    ? `Read and saved ${added.length} shifts for "${nameFound}": ${added.map(shiftLine).join('; ')}.${past === added.length ? ' (That whole schedule is already in the past: tell him, and ask for the new one.)' : ''} They're saved: don't add them again. Read them back to him briefly, in these exact times, so he can correct anything.`
+    : `Found "${nameFound}" but no shifts on it (all days off?). Tell him what you saw.`;
 }
 
 // a schedule photo he just sent (attachments.js): read straight away, under his saved name or as "Chris"
