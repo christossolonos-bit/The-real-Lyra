@@ -29,3 +29,7 @@ Thumbs.db
 # her logs
 companion/logs/
 work/
+
+# Lyra singing voice (Seed-VC, its environment and models, her voice reference): local only; the pipeline script is shared
+singing/*
+!singing/lyra_sing.py

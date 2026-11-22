@@ -15,6 +15,7 @@ import { todaysJournal, JOURNAL_DIR } from './journal.js';
 import { logFailure } from './failures.js';
 import { startTask, listTasks, cancelTask } from './agents.js';
 import { MUSIC_DIR, tracks, findTrack, playlists, findPlaylist, savePlaylist, deletePlaylist, addSong, musicAsk, stripMusicFiller } from './music.js';
+import { herVoiceReady, inHerVoice } from './singvoice.js';
 import { fetchYoutube } from './youtube.js';
 import { resolveSpotify, isSpotifyAsk } from './spotify.js';
 import { findStation, isRadioAsk } from './radio.js';
@@ -149,6 +150,22 @@ export const TOOLS = {
     run: makeImage,
   },
 
+  sing_song: {
+    enabled: (ctx) => Boolean(herVoiceReady() && (ctx.sendHere || ctx.showAudio) && ctx.perms?.owner),
+    definition: {
+      type: 'function',
+      function: {
+        name: 'sing_song',
+        description: 'Sing a song from your music library in your own singing voice (a song he sent you, one you made, or any track there): the vocals are replaced with your voice and it is posted here when ready (a few minutes). track = the song name; start / length in seconds to sing only part of it.',
+        parameters: { type: 'object', properties: {
+          track: { type: 'string', description: 'The song title (or part of it) in your music library' },
+          start: { type: 'number' }, length: { type: 'number' },
+        }, required: ['track'] },
+      },
+    },
+    run: singSongTool,
+  },
+
   generate_music: {
     enabled: (ctx) => Boolean(config.openrouter.apiKey && (ctx.sendHere || ctx.showAudio) && ctx.perms?.files),
     definition: {
@@ -168,6 +185,7 @@ export const TOOLS = {
             },
             length: { type: 'string', enum: ['clip', 'full'], description: '"clip" for a 30-second clip, "full" for a full-length song with verses and chorus' },
             title: { type: 'string', description: 'A short song title, used to find and play it later' },
+            voice: { type: 'string', enum: ['lyra', 'original'], description: '"lyra" (default): the vocals are sung in your own singing voice; "original" only if he asks for the generated singer' },
           },
           required: ['prompt', 'length'],
         },
@@ -1049,22 +1067,62 @@ function findChannel(ctx, who) {
 }
 
 // Lyria makes the track; it's kept in data/music and shared like an image.
-async function makeMusic({ prompt, length, title }, ctx) {
+async function makeMusic({ prompt, length, title, voice }, ctx) {
   if (!prompt?.trim()) return 'Error: empty music prompt';
   const full = length === 'full';
   const started = Date.now();
-  const { bytes, lyrics } = await generateMusic(prompt.trim(), full ? 'full' : 'clip');
+  let { bytes, lyrics } = await generateMusic(prompt.trim(), full ? 'full' : 'clip');
+  const songTitle = (typeof title === 'string' && title.trim()) || prompt.split(/[,.;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' ');
+  // her own singing voice on it (singvoice.js, Seed-VC): about 2.6x the song's length on this GPU (a clip ~1.5 min,
+  // a full song ~8 min), so it's done in the background and posted when ready; she answers meanwhile
+  const vocal = lyrics && lyrics !== '<instrumental>';
+  const voiceNote = '';
+  if (vocal && voice !== 'original' && herVoiceReady()) return singInBackground(bytes, { title: songTitle, about: prompt.trim().slice(0, 300), ctx, lyrics, full });
   // Into the library (data/music) under its title, so it can be played and playlisted later.
-  const name = addSong(bytes, {
-    title: (typeof title === 'string' && title.trim()) || prompt.split(/[,.;:]/)[0].trim().split(/\s+/).slice(0, 6).join(' '),
-    about: prompt.trim().slice(0, 300),
-  });
+  const name = addSong(bytes, { title: songTitle, about: prompt.trim().slice(0, 300) });
   if (bytes.length > MAX_FILE_BYTES && !ctx.showAudio) return `The song is saved in the music library, but it's too big to attach on Discord (${(bytes.length / 1048576).toFixed(1)} MB). Offer to play it in voice instead.`;
   if (ctx.showAudio) await ctx.showAudio({ mime: 'audio/mpeg', base64: bytes.toString('base64'), name });
   else await ctx.sendHere(new AttachmentBuilder(bytes, { name }));
   activity('file', { filename: name, bytes: bytes.length, to: ctx.showAudio ? 'avatar studio' : 'here', ms: Date.now() - started });
   const words = lyrics && lyrics !== '<instrumental>' ? ` Its lyrics: ${lyrics.slice(0, 1500)}` : ' It is instrumental.';
-  return `The ${full ? 'song' : '30-second clip'} is done and now playing in the chat.${words} Say something short about it; don't read out all the lyrics.`;
+  return `The ${full ? 'song' : '30-second clip'} is done and now playing in the chat.${voiceNote}${words} Say something short about it; don't read out all the lyrics.`;
+}
+
+// A song with her voice put on it takes minutes, so it's done in the background and posted here when ready
+// (her singing voice, singvoice.js). If her voice can't be put on it, the original is posted instead.
+function singInBackground(bytes, { title, about, ctx, lyrics = '', full = true }) {
+  const share = async (buf, note) => {
+    const name = addSong(buf, { title, about });
+    if (buf.length > MAX_FILE_BYTES && !ctx.showAudio) return ctx.sendHere?.(`${note} "${title}" is in the music library (too big to attach); ask me to play it in voice.`).catch(() => {});
+    if (ctx.showAudio) await ctx.showAudio({ mime: 'audio/mpeg', base64: buf.toString('base64'), name });
+    else await ctx.sendHere?.({ content: note, files: [new AttachmentBuilder(buf, { name })] });
+  };
+  inHerVoice(bytes)
+    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`))
+    .catch((err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
+    .catch((err) => activity('error', { where: 'singing', message: err.message }));
+  const words = lyrics && lyrics !== '<instrumental>' ? ` Its lyrics: ${lyrics.slice(0, 800)}` : '';
+  return `The ${full ? 'song' : 'clip'} is made, and you're now singing it in your own voice: that takes ${full ? 'about 8 minutes' : 'a minute or two'}, and it'll be posted here when it's ready. Tell him that, briefly.${words}`;
+}
+
+// "Sing Seven Little Buckets": a song from her music library, sung in her own voice (a new track, "... (Lyra)")
+async function singSongTool({ track, start = 0, length = 0 }, ctx) {
+  if (!herVoiceReady()) return "Error: your singing voice (Seed-VC) isn't set up on this PC.";
+  const t = findTrack(track);
+  if (!t) return `Error: no song like "${track}" in your music library. Songs: ${tracks().slice(0, 25).map((x) => x.title).join(', ')}.`;
+  const bytes = readFileSync(path.join(MUSIC_DIR, t.file));
+  const title = `${t.title.replace(/\s*\(Lyra\)$/i, '')} (Lyra)`;
+  const share = async (buf, note) => {
+    const name = addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice` });
+    if (buf.length > MAX_FILE_BYTES && !ctx.showAudio) return ctx.sendHere?.(`${note} It's in the music library as "${title}" (too big to attach); ask me to play it in voice.`).catch(() => {});
+    if (ctx.showAudio) await ctx.showAudio({ mime: 'audio/mpeg', base64: buf.toString('base64'), name });
+    else await ctx.sendHere?.({ content: note, files: [new AttachmentBuilder(buf, { name })] });
+  };
+  inHerVoice(bytes, { ext: path.extname(t.file).slice(1) || 'mp3', start: Number(start) || 0, length: Number(length) || 0 })
+    .then((hers) => share(hers, `🎤 "${t.title}", sung in my voice.`))
+    .catch((err) => { activity('error', { where: 'singing', message: err.message }); return ctx.sendHere?.(`I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })
+    .catch(() => {});
+  return `You've started singing "${t.title}" in your own voice: it takes a few minutes (longer for a long song), and it'll be posted here when it's ready, saved as "${title}". Tell him that, briefly.`;
 }
 
 // Changes the reply brain from conversation. A model name can be partial ("kimi") and is matched

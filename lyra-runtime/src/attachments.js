@@ -123,7 +123,17 @@ export async function readAttachments(message, { owner, conversation }) {
   for (const att of message.attachments.values()) {
     const type = att.contentType || '';
     try {
-      if (type.startsWith('audio/') || message.flags?.has?.(1 << 13) /* IsVoiceMessage */) {
+      // a song file he sends (not a voice message): into her music library, so she can play it or sing it
+      const songFile = !message.flags?.has?.(1 << 13) && /\.(mp3|wav|m4a|flac|aac|ogg|opus)$/i.test(att.name) && !/^voice-message/i.test(att.name);
+      if (songFile && owner) {
+        const { addSong } = await import('./music.js');
+        const title = path.basename(att.name).replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 60) || 'song';
+        const buf = await download(att);
+        const file = addSong(buf, { title, about: `a song Chris sent on ${momentLabel()}` });
+        said.push(`(sent the song "${title}")`);
+        extra.push(`Chris sent a song file: "${title}", now in your music library (${file}). If he wants you to sing it in your own voice, use your sing_song tool (track "${title}"); otherwise you can play it.`);
+        activity('music', { message: `Saved "${title}" from Chris to the music library` });
+      } else if (type.startsWith('audio/') || message.flags?.has?.(1 << 13) /* IsVoiceMessage */) {
         const t = await transcribeVoiceMessage(att);
         said.push(t || '(a voice message she couldn\'t make out)');
         activity('heard', { voice: true, speaker: message.author.username, text: t, via: 'voice message' });
