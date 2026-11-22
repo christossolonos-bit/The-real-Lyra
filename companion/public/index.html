@@ -71,7 +71,10 @@
 <div id="heard"></div>
 <div id="bar">
   <button id="mic" title="PC microphone on/off">🎙</button>
-  <input id="text" placeholder="Just talk (PC mic), or type here…" autocomplete="off">
+  <button id="attach" title="Send her a photo or file (or paste / drop it here)">📎</button>
+  <input type="file" id="filePick" multiple hidden accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.csv,.json,.mp3,.wav,.m4a,.flac">
+  <span id="files"></span>
+  <input id="text" placeholder="Just talk (PC mic), or type here… (paste a photo with Ctrl+V)" autocomplete="off">
   <button id="send">Send</button>
   <span class="chip" id="earsChip">mic: starting…</span>
   <span id="status"></span>
@@ -176,7 +179,39 @@ async function exchange(path, body = {}, showUser) {
   catch (e) { add('note', `Couldn't reach Lyra: ${e.message}`); }
   finally { busy = false; status(''); lyraBody()?.think(false); lastActivity = Date.now(); }
 }
-function sendText(t) { t = t.trim(); if (!t) return; $('text').value = ''; $('heard').textContent = ''; exchange('/api/talk', { text: t }, t); }
+// ---- files for her: pasted (Ctrl+V), dropped on the page, or picked with 📎 (2026-11-23) ----
+let pending = [];
+const MAX_FILE = 25 * 1024 * 1024;
+function showFiles() {
+  $('files').innerHTML = pending.map((f, i) => `<span class="chip" title="${f.name.replace(/"/g, '&quot;')}">📎 ${f.name.length > 22 ? f.name.slice(0, 20) + '…' : f.name} <a href="#" data-i="${i}" style="color:inherit;text-decoration:none">×</a></span>`).join(' ');
+}
+function addFiles(list) {
+  for (const f of list) {
+    if (!f) continue;
+    if (f.size > MAX_FILE) { add('note', `${f.name} is too big (over 25 MB).`); continue; }
+    const name = f.name && f.name !== 'image.png' ? f.name : `pasted-${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`;
+    pending.push(new File([f], name, { type: f.type }));
+  }
+  pending = pending.slice(0, 5);
+  showFiles();
+  $('text').focus();
+}
+$('files').onclick = (e) => { const i = e.target.dataset?.i; if (i !== undefined) { e.preventDefault(); pending.splice(Number(i), 1); showFiles(); } };
+$('attach').onclick = () => $('filePick').click();
+$('filePick').onchange = () => { addFiles([...$('filePick').files]); $('filePick').value = ''; };
+document.addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
+document.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', (e) => { const fs = [...(e.dataTransfer?.files || [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
+const toBase64 = (f) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = () => no(r.error); r.readAsDataURL(f); });
+async function sendText(t) {
+  t = t.trim();
+  if (!t && !pending.length) return;
+  const files = pending; pending = []; showFiles();
+  $('text').value = ''; $('heard').textContent = '';
+  const payload = files.length ? await Promise.all(files.map(async (f) => ({ name: f.name, type: f.type || 'application/octet-stream', base64: await toBase64(f) }))) : undefined;
+  const shown = [t, ...files.map((f) => `📎 ${f.name}`)].filter(Boolean).join('  ');
+  exchange('/api/talk', payload ? { text: t, files: payload } : { text: t }, shown);
+}
 $('send').onclick = () => sendText($('text').value);
 $('text').onkeydown = (e) => { if (e.key === 'Enter') sendText($('text').value); };
 

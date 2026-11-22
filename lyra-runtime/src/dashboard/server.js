@@ -59,7 +59,8 @@ export function startDashboard(bot) {
           // Binary uploads (mic audio, .glb models) are read by their own handler.
           const ct = String(req.headers['content-type'] || '');
           const binary = ct === 'application/octet-stream' || ct.startsWith('model/') || /\/model$/.test(pathname);
-          const body = ['POST', 'PUT'].includes(req.method) && !binary ? await readJson(req) : {};
+          // a hologram turn can carry files (a photo, a PDF): up to 40 MB there, 1 MB everywhere else
+          const body = ['POST', 'PUT'].includes(req.method) && !binary ? await readJson(req, pathname === '/api/lyra/turn' ? 40e6 : 1e6) : {};
           const result = await handler({ req, res, url, params: match.groups ?? {}, body });
           if (result !== undefined) send(res, 200, result);
           return;
@@ -365,7 +366,20 @@ function buildRoutes(bot) {
       if (isOwner && !body.cue) (await import('../personal.js')).setAway(false, 'talked to her on the hologram');
       const key = `lyra-${conversation}`;
       const cue = body.cue ? String(body.cue).slice(0, 1500) : undefined;
-      const text = cue ? '' : String(body.text || '').trim().slice(0, 1500);
+      let text = cue ? '' : String(body.text || '').trim().slice(0, 1500);
+      // files pasted or dropped into the hologram chat (2026-11-23): read exactly like Discord attachments (attachments.js)
+      let attached = { said: '', extra: '' };
+      const files = !cue && Array.isArray(body.files) ? body.files.slice(0, 5).filter((f) => f?.base64 && f?.name) : [];
+      if (files.length) {
+        const { readAttachments } = await import('../attachments.js');
+        const message = {
+          content: text, author: { username: isOwner ? 'solonaras2' : name },
+          attachments: new Map(files.map((f, i) => [String(i), { name: String(f.name).slice(0, 120), contentType: String(f.type || 'application/octet-stream'), size: Math.floor(String(f.base64).length * 0.75), url: `data:${f.type || 'application/octet-stream'};base64,${f.base64}` }])),
+          flags: { has: () => false },
+        };
+        attached = await readAttachments(message, { owner: isOwner, conversation });
+        text = [text, attached.said].filter(Boolean).join(' ').trim();
+      }
       if (!cue && !text) throw Object.assign(new Error('text or cue is required'), { status: 400 });
       const sentences = [];
       let feelings = emotion.current(key);
@@ -387,6 +401,7 @@ function buildRoutes(bot) {
         discord: { client: online() },
         seen: body.sees ? String(body.sees).slice(0, 800) : '', // how Chris looked: kept with what she remembers
         systemExtra: [
+          attached.extra,
           `Right now you're talking through your hologram on Chris's computer${isOwner ? ', with Chris himself' : `, with ${name}, a visitor at the campus terminal`}. ` +
             `Whatever you say is spoken out loud in your voice, so keep it to plain spoken sentences.`,
           // what her webcam eyes see (who's there, their expressions, a described snapshot when someone asked her to look)
@@ -904,11 +919,11 @@ function send(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-async function readJson(req) {
+async function readJson(req, limit = 1e6) {
   let raw = '';
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > 1e6) throw Object.assign(new Error('Body too large'), { status: 413 });
+    if (raw.length > limit) throw Object.assign(new Error('Body too large'), { status: 413 });
   }
   if (!raw) return {};
   try {

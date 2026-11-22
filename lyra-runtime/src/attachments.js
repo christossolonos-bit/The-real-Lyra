@@ -154,7 +154,7 @@ export async function readAttachments(message, { owner, conversation }) {
           if (/\b(rota|schedule|shifts?|timetable|roster)\b/i.test(seen)) {
             try {
               const r = await (await import('./daily.js')).readSchedule(doc.id);
-              schedule = r.startsWith('Error') ? `You couldn't find him on it yet: ${r.replace(/^Error:\s*/, '')}` : `You've already read his shifts off it and saved them: ${r}`;
+              schedule = r.startsWith('Error') ? `You couldn't find him on it yet: ${r.replace(/^Error:\s*/, '')}` : `Chris IS on it (the name on the rota is how his own name is written there), and you've already read his shifts off it and saved them: ${r}`;
             } catch (err) { schedule = `Reading his shifts failed (${err.message}); tell him.`; }
           }
           extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +

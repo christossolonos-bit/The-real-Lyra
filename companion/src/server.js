@@ -145,11 +145,11 @@ Trust this over anything you described earlier; things change.`
   return lines.join("\n");
 }
 
-async function runtimeTurn({ name, isOwner, text, cue }) {
+async function runtimeTurn({ name, isOwner, text, cue, files }) {
   const sees = await seesText(name, text);
   const res = await fetch(`${RUNTIME}/api/lyra/turn`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, isOwner, text, cue, sees }), signal: AbortSignal.timeout(120000),
+    body: JSON.stringify({ name, isOwner, text, cue, sees, files }), signal: AbortSignal.timeout(180000),
   });
   if (!res.ok) throw new Error(`runtime ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const r = await res.json();
@@ -161,12 +161,12 @@ async function runtimeTurn({ name, isOwner, text, cue }) {
     state: { name: mood, strength: top ? Math.min(1, top[1]) : 0.3 }, feelings: r.feelings, mind: "runtime" };
 }
 
-async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cue }) {
+async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cue, files }) {
   busy = true;
   try {
     // her one mind first
     try {
-      const out = await runtimeTurn({ name, isOwner, text: cue ? undefined : (text ?? content), cue: cue ? content : undefined });
+      const out = await runtimeTurn({ name, isOwner, text: cue ? undefined : (text ?? content), cue: cue ? content : undefined, files });
       if (runtimeUp !== true) { runtimeUp = true; console.log("Using Lyra's runtime mind (one memory with Discord)."); }
       let audio = null, voiceError = null;
       if (out.speech && voice === "page") { try { audio = await speak(out.speech); } catch (e) { voiceError = e.message; } }
@@ -267,9 +267,12 @@ const routes = {
     const { name, isOwner } = who(b);
     if (isOwner) care.active();
     const text = String(b.text || "").trim().slice(0, 1200);
-    if (!text) return { error: "empty" };
+    // files pasted or dropped into the chat box (a schedule photo, a PDF): passed on to her runtime to read
+    const files = Array.isArray(b.files) ? b.files.slice(0, 5).filter((f) => f && f.name && f.base64) : [];
+    if (!text && !files.length) return { error: "empty" };
     mind.arrive(name);
-    return turn({ name, isOwner, text, content: `[${clock()}] ${text}` });
+    const shown = text || `(sent ${files.map((f) => f.name).join(", ")})`;
+    return turn({ name, isOwner, text, files, content: `[${clock()}] ${shown}` });
   },
   // a quiet moment: she may say something on her own
   "POST /api/idle": async (b) => {
@@ -386,7 +389,9 @@ http.createServer(async (req, res) => {
   const key = `${req.method} ${url.pathname}`;
   if (routes[key]) {
     let body = "";
-    req.on("data", (c) => { body += c; if (body.length > 800000) req.destroy(); });
+    // files in the chat box come as base64: 40 MB for /api/talk, 800 KB elsewhere
+    const limit = req.url.startsWith("/api/talk") ? 40e6 : 800000;
+    req.on("data", (c) => { body += c; if (body.length > limit) req.destroy(); });
     req.on("end", async () => {
       let out;
       try { out = await routes[key](JSON.parse(body || "{}")); } catch (e) { console.error(e); out = { error: e.message }; }
