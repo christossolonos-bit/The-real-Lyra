@@ -16,6 +16,7 @@
   header h1 { margin:0; font-size:18px; }
   #call { margin-left:auto; font-size:13px; color:var(--muted); }
   #call.on { color:var(--good); }
+  #stop { border:1px solid var(--bad); color:var(--bad); background:var(--panel); border-radius:8px; padding:5px 12px; font:inherit; font-size:14px; cursor:pointer; }
   main { max-width:1000px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
   .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
   h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
@@ -40,9 +41,9 @@
   .badge.made { color:var(--accent); border-color:var(--accent); }
   .job { display:flex; gap:10px; align-items:center; padding:6px 0; font-size:14px; }
   .job .state { font-size:12px; color:var(--muted); }
-  .job.done .state { color:var(--good); } .job.failed .state { color:var(--bad); }
+  .job.done .state { color:var(--good); } .job.failed .state, .job.cancelled .state { color:var(--bad); }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--her); animation:pulse 1.2s infinite; flex:none; }
-  .job.done .dot, .job.failed .dot { animation:none; background:currentColor; }
+  .job.done .dot, .job.failed .dot, .job.cancelled .dot { animation:none; background:currentColor; }
   @keyframes pulse { 50% { opacity:.25; } }
   .empty { color:var(--muted); }
   .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
@@ -55,6 +56,7 @@
   <a href="/">← Dashboard</a>
   <h1>Songs</h1>
   <span id="call">…</span>
+  <button id="stop" hidden title="Stop the song in the call and anything she's still singing">⏹ Stop singing</button>
 </header>
 <main>
   <section class="card" id="jobsCard" hidden>
@@ -103,11 +105,12 @@ function render() {
   const c = $('#call');
   c.textContent = call ? `🔊 In a call${call.channel ? `: ${call.channel}` : ''}` : 'Not in a voice call';
   c.className = call ? 'on' : '';
+  $('#stop').hidden = !(call?.playing || data.singing.some((j) => j.state === 'singing'));
   // songs being sung
   const jobs = data.singing.slice().sort((a, b) => b.at - a.at);
   $('#jobsCard').hidden = !jobs.length;
   $('#jobs').innerHTML = jobs.map((j) => `<div class="job ${j.state}"><span class="dot"></span><span>${esc(j.title)}</span>` +
-    `<span class="state">${j.state === 'singing' ? `singing in her voice… ${Math.round((Date.now() - j.at) / 1000)} s` : j.state === 'done' ? 'done: it\'s in the list below' : `failed: ${esc(j.error || '')}`}</span></div>`).join('');
+    `<span class="state">${j.state === 'singing' ? `singing in her voice… ${Math.round((Date.now() - j.at) / 1000)} s` : j.state === 'done' ? 'done: it\'s in the list below' : j.state === 'cancelled' ? 'cancelled' : `failed: ${esc(j.error || '')}`}</span></div>`).join('');
   // the list (players that are playing stay untouched)
   const q = query.toLowerCase();
   const list = data.songs.filter((s) => (filter === 'all' || kind(s) === filter) && (!q || `${s.title} ${s.about}`.toLowerCase().includes(q)));
@@ -150,6 +153,9 @@ document.addEventListener('click', async (ev) => {
       toast((await api('DELETE', `/api/songs/${encodeURIComponent(file)}`)).message); playing.clear(); await load();
     }
   } catch (err) { toast(err.message); btn.disabled = false; }
+});
+$('#stop').addEventListener('click', async () => {
+  try { toast((await api('POST', '/api/songs/stop')).message); playing.clear(); await load(); } catch (err) { toast(err.message); }
 });
 $('#q').addEventListener('input', (ev) => { query = ev.target.value; playing.clear(); render(); });
 

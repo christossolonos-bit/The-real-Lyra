@@ -1,3 +1,4 @@
+import { stopSinging, singingNow } from '../singvoice.js';
 import { waitFor } from './endpoint.js';
 import {
   joinVoiceChannel,
@@ -293,8 +294,9 @@ class VoiceSession {
 
     // Lyra (Chris, 2026-11-17): "I tell her to stop the song, she says ok and then resumes it." Her brain
     // sometimes picked "play" for "stop". Stopping music with her name is now handled here, without the brain.
-    if (addressed(text) && MUSIC_STOP.test(text) && this.music.on) {
+    if (addressed(text) && MUSIC_STOP.test(text) && (this.music.on || singingNow())) {
       this.stopMusic();
+      stopSinging(); // a song still being sung in her voice won't start later either
       addMessage(this.conversation, { role: 'user', userId, name: speaker.name, content: text });
       addMessage(this.conversation, { role: 'assistant', content: 'Stopped the music.' });
       activity('music', { action: 'stop', by: speaker.name, how: 'voice command' });

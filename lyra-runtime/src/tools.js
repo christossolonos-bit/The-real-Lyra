@@ -15,7 +15,7 @@ import { todaysJournal, JOURNAL_DIR } from './journal.js';
 import { logFailure } from './failures.js';
 import { startTask, listTasks, cancelTask } from './agents.js';
 import { MUSIC_DIR, tracks, findTrack, playlists, findPlaylist, savePlaylist, deletePlaylist, addSong, musicAsk, stripMusicFiller } from './music.js';
-import { herVoiceReady, inHerVoice } from './singvoice.js';
+import { herVoiceReady, inHerVoice, stopSinging, singingNow } from './singvoice.js';
 import { fetchYoutube } from './youtube.js';
 import { resolveSpotify, isSpotifyAsk } from './spotify.js';
 import { findStation, isRadioAsk } from './radio.js';
@@ -156,11 +156,12 @@ export const TOOLS = {
       type: 'function',
       function: {
         name: 'sing_song',
-        description: 'Sing a song from your music library in your own singing voice (a song he sent you, one you made, or any track there): the vocals are replaced with your voice and it is posted here when ready (a few minutes). track = the song name; start / length in seconds to sing only part of it.',
+        description: 'Sing a song from your music library in your own singing voice (a song he sent you, one you made, or any track there): the vocals are replaced with your voice and it is posted here when ready (a few minutes); in a call it plays there too. track = the song name; start / length in seconds to sing only part of it. action stop = stop singing: stops the song playing in the call and cancels any song you are still singing in your voice ("stop singing", "stop", "that\'s enough").',
         parameters: { type: 'object', properties: {
+          action: { type: 'string', enum: ['sing', 'stop'] },
           track: { type: 'string', description: 'The song title (or part of it) in your music library' },
           start: { type: 'number' }, length: { type: 'number' },
-        }, required: ['track'] },
+        }, required: [] },
       },
     },
     run: singSongTool,
@@ -1117,14 +1118,24 @@ function singInBackground(bytes, { title, about, ctx, lyrics = '', full = true }
   };
   // the original only when her voice couldn't be put on it (not when posting failed)
   inHerVoice(bytes)
-    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`, true), (err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
+    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`, true), (err) => err.cancelled ? null : share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
     .catch((err) => activity('error', { where: 'singing', message: `posting "${title}": ${err.message}` }));
   const words = lyrics && lyrics !== '<instrumental>' ? ` Its lyrics: ${lyrics.slice(0, 800)}` : '';
   return `The ${full ? 'song' : 'clip'} is made, and you're now singing it in your own voice: that takes ${full ? 'about 8 minutes' : 'a minute or two'}, and it'll be posted here when it's ready. Tell him that, briefly.${words}`;
 }
 
 // "Sing Seven Little Buckets": a song from her music library, sung in her own voice (a new track, "... (Lyra)")
-async function singSongTool({ track, start = 0, length = 0 }, ctx) {
+async function singSongTool({ action = 'sing', track, start = 0, length = 0 }, ctx) {
+  // stop: the song playing in the call, and anything she's still singing in her voice
+  if (action === 'stop') {
+    const cancelled = stopSinging();
+    const call = ctx.voice;
+    const wasPlaying = Boolean(call?.music?.on);
+    if (wasPlaying) call.stopMusic();
+    const done = [wasPlaying && 'stopped the song in the call', cancelled && `cancelled ${cancelled} song${cancelled > 1 ? 's' : ''} you were still singing in your voice`].filter(Boolean);
+    return done.length ? `Done: ${done.join(', and ')}. Tell him, briefly.` : "You weren't singing anything. Say so, briefly.";
+  }
+  if (!track) return 'Error: which song (track)?';
   if (!herVoiceReady()) return "Error: your singing voice (Seed-VC) isn't set up on this PC.";
   // her version already exists: play it in the call / post it, no need to sing it again
   const mine = findTrack(`${String(track).replace(/\s*\(lyra\)\s*$/i, '')} (Lyra)`);
@@ -1142,7 +1153,7 @@ async function singSongTool({ track, start = 0, length = 0 }, ctx) {
   };
   inHerVoice(bytes, { ext: path.extname(t.file).slice(1) || 'mp3', start: Number(start) || 0, length: Number(length) || 0 })
     .then((hers) => share(hers, `🎤 "${t.title}", sung in my voice.`))
-    .catch((err) => { activity('error', { where: 'singing', message: err.message }); return postLater(ctx, `I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })
+    .catch((err) => { if (err.cancelled) return null; activity('error', { where: 'singing', message: err.message }); return postLater(ctx, `I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })
     .catch((err) => activity('error', { where: 'singing', message: err.message }));
   return `You've started singing "${t.title}" in your own voice: it takes a few minutes (longer for a long song), and it'll be posted here when it's ready, saved as "${title}". Tell him that, briefly.`;
 }
@@ -1359,7 +1370,7 @@ async function musicControl({ action, tracks: titles, playlist, shuffle, youtube
         return `Done: ${action}.`;
       }
       if (!player) return "Error: nothing is playing; you're not in a voice channel.";
-      const ok = { pause: () => player.pauseMusic(), resume: () => player.resumeMusic(), skip: () => player.skipMusic(), stop: () => (player.stopMusic(), true) }[action]();
+      const ok = { pause: () => player.pauseMusic(), resume: () => player.resumeMusic(), skip: () => player.skipMusic(), stop: () => (player.stopMusic(), stopSinging(), true) }[action]();
       if (action === 'skip' && player.music.on) return `Skipped. Now playing: ${title(player.musicStatus().current)}.`;
       return ok ? `Done: ${action}.` : 'Nothing is playing right now.';
     }

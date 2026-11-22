@@ -515,7 +515,7 @@ function buildRoutes(bot) {
     // The Songs page (/songs.html): her songs, played in the call or sung in her voice (2026-11-22)
     r('GET', '/api/songs', async () => ({
       songs: music.tracks().sort((a, b) => b.at - a.at),
-      calls: [...sessions.values()].map((s) => ({ guildId: s.guild?.id, ...s.summary() })),
+      calls: [...sessions.values()].map((s) => ({ guildId: s.guild?.id, ...s.summary(), playing: Boolean(s.music?.on) })),
       singing: [...songJobs.values()].filter((j) => Date.now() - j.at < 30 * 60_000),
       herVoice: (await import('../singvoice.js')).herVoiceReady(),
     })),
@@ -542,8 +542,18 @@ function buildRoutes(bot) {
           songJobs.set(id, { ...songJobs.get(id), state: 'done', file, done: Date.now() });
           if (body.playInCall && sessions.size) [...sessions.values()][0].playMusic([file], { titles: { [file]: title } });
         })
-        .catch((err) => songJobs.set(id, { ...songJobs.get(id), state: 'failed', error: err.message.slice(0, 200) }));
+        .catch((err) => songJobs.set(id, { ...songJobs.get(id), state: err.cancelled ? 'cancelled' : 'failed', error: err.message.slice(0, 200) }));
       return { ok: true, message: `Singing "${t.title}" in her voice: it takes about 2.6x the song's length.` };
+    }),
+    // stop: the song playing in the call, and anything still being sung in her voice
+    r('POST', '/api/songs/stop', async () => {
+      const { stopSinging } = await import('../singvoice.js');
+      let inCall = 0;
+      for (const s of sessions.values()) if (s.music?.on) { s.stopMusic(); inCall++; }
+      const cancelled = stopSinging();
+      for (const [id, j] of songJobs) if (j.state === 'singing') songJobs.set(id, { ...j, state: 'cancelled' });
+      const done = [inCall && 'Stopped the song in the call', cancelled && `${inCall ? 'cancelled' : 'Cancelled'} ${cancelled} song${cancelled > 1 ? 's' : ''} she was singing`].filter(Boolean);
+      return { ok: true, message: done.length ? `${done.join(' and ')}.` : "She wasn't singing anything." };
     }),
     r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
     r('GET', '/api/pressure', () => pressure.snapshot()),
