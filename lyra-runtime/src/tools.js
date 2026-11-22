@@ -1088,19 +1088,26 @@ async function makeMusic({ prompt, length, title, voice }, ctx) {
   return `The ${full ? 'song' : '30-second clip'} is done and now playing in the chat.${voiceNote}${words} Say something short about it; don't read out all the lyrics.`;
 }
 
+// Posting a song minutes after her reply (2026-11-22: sendHere only adds a file to the reply being written, or in a
+// call takes a file and nothing else, so a finished song posted through it failed). In a Discord chat or call: that
+// channel; anywhere else (the dashboard page may be closed by then): a DM to Chris.
+async function postLater(ctx, note, buf, name) {
+  const file = buf && buf.length <= MAX_FILE_BYTES ? new AttachmentBuilder(buf, { name }) : null;
+  const text = buf && !file ? `${note} (It's too big to attach; it's in the music library, ask me to play it in voice.)` : note;
+  if (ctx.postLater) return ctx.postLater(text, file);
+  const owner = config.ownerIds[0];
+  if (ctx.client && owner) return (await ctx.client.users.fetch(owner)).send({ content: text, files: file ? [file] : [] });
+  throw new Error('nowhere to post the song (Discord is offline)');
+}
+
 // A song with her voice put on it takes minutes, so it's done in the background and posted here when ready
 // (her singing voice, singvoice.js). If her voice can't be put on it, the original is posted instead.
 function singInBackground(bytes, { title, about, ctx, lyrics = '', full = true }) {
-  const share = async (buf, note) => {
-    const name = addSong(buf, { title, about });
-    if (buf.length > MAX_FILE_BYTES && !ctx.showAudio) return ctx.sendHere?.(`${note} "${title}" is in the music library (too big to attach); ask me to play it in voice.`).catch(() => {});
-    if (ctx.showAudio) await ctx.showAudio({ mime: 'audio/mpeg', base64: buf.toString('base64'), name });
-    else await ctx.sendHere?.({ content: note, files: [new AttachmentBuilder(buf, { name })] });
-  };
+  const share = async (buf, note) => postLater(ctx, note, buf, addSong(buf, { title, about }));
+  // the original only when her voice couldn't be put on it (not when posting failed)
   inHerVoice(bytes)
-    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`))
-    .catch((err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
-    .catch((err) => activity('error', { where: 'singing', message: err.message }));
+    .then((hers) => share(hers, `🎤 "${title}", sung in my voice.`), (err) => share(bytes, `Couldn't put my voice on "${title}" (${err.message.slice(0, 100)}), so here's the original.`))
+    .catch((err) => activity('error', { where: 'singing', message: `posting "${title}": ${err.message}` }));
   const words = lyrics && lyrics !== '<instrumental>' ? ` Its lyrics: ${lyrics.slice(0, 800)}` : '';
   return `The ${full ? 'song' : 'clip'} is made, and you're now singing it in your own voice: that takes ${full ? 'about 8 minutes' : 'a minute or two'}, and it'll be posted here when it's ready. Tell him that, briefly.${words}`;
 }
@@ -1112,16 +1119,11 @@ async function singSongTool({ track, start = 0, length = 0 }, ctx) {
   if (!t) return `Error: no song like "${track}" in your music library. Songs: ${tracks().slice(0, 25).map((x) => x.title).join(', ')}.`;
   const bytes = readFileSync(path.join(MUSIC_DIR, t.file));
   const title = `${t.title.replace(/\s*\(Lyra\)$/i, '')} (Lyra)`;
-  const share = async (buf, note) => {
-    const name = addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice` });
-    if (buf.length > MAX_FILE_BYTES && !ctx.showAudio) return ctx.sendHere?.(`${note} It's in the music library as "${title}" (too big to attach); ask me to play it in voice.`).catch(() => {});
-    if (ctx.showAudio) await ctx.showAudio({ mime: 'audio/mpeg', base64: buf.toString('base64'), name });
-    else await ctx.sendHere?.({ content: note, files: [new AttachmentBuilder(buf, { name })] });
-  };
+  const share = async (buf, note) => postLater(ctx, note, buf, addSong(buf, { title, about: `${t.title}, sung by Lyra in her own voice` }));
   inHerVoice(bytes, { ext: path.extname(t.file).slice(1) || 'mp3', start: Number(start) || 0, length: Number(length) || 0 })
     .then((hers) => share(hers, `🎤 "${t.title}", sung in my voice.`))
-    .catch((err) => { activity('error', { where: 'singing', message: err.message }); return ctx.sendHere?.(`I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })
-    .catch(() => {});
+    .catch((err) => { activity('error', { where: 'singing', message: err.message }); return postLater(ctx, `I couldn't sing "${t.title}": ${err.message.slice(0, 200)}`); })
+    .catch((err) => activity('error', { where: 'singing', message: err.message }));
   return `You've started singing "${t.title}" in your own voice: it takes a few minutes (longer for a long song), and it'll be posted here when it's ready, saved as "${title}". Tell him that, briefly.`;
 }
 

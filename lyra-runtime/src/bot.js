@@ -136,6 +136,8 @@ function createClient() {
           client,
           guild: message.guild,
           sendHere: async (file) => files.push(file),
+          // a message (and file) posted in this channel later, after this reply has gone (a song she's singing)
+          postLater: (content, file) => message.channel.send({ content, files: file ? [file] : [], allowedMentions: { parse: [] } }),
           voice: message.guild && sessions.get(message.guild.id),
           // Background helpers report back here when they finish, long after this reply.
           notify: (text) => { for (const chunk of splitMessage(text)) message.channel.send({ content: chunk, allowedMentions: { parse: [] } }).catch(() => {}); },

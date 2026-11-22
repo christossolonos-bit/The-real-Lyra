@@ -325,6 +325,7 @@ class VoiceSession {
           client: this.guild.client,
           guild: this.guild,
           sendHere: (file) => this.textChannel.send({ files: [file] }),
+          postLater: (content, file) => this.textChannel.send({ content, files: file ? [file] : [], allowedMentions: { parse: [] } }),
           voice: this,
           notify: (text) => this.reportTask(text),
         } : { voice: this, notify: (text) => this.reportTask(text) },
