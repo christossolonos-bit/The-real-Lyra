@@ -126,6 +126,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- money for anything about his money: spending, bills, budgets, account balances, money in or moved, "how much do I have", "check my finance". Pick it even if it was answered earlier in the conversation: balances change, and the answer must come from the tracker, never from memory.\n` +
         `- documents for questions about a file or photo he sent (what it says or shows), even if asked before.\n` +
         `- read_link when he shares a web link (not YouTube) to read, summarise or ask about.\n` +
+        `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it).\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
         `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
@@ -165,6 +166,8 @@ export async function planTurn(history, speaker, text, tools) {
   if (theaterAsk(text) || (showing && /\b(theater|theatre|video|watching|pause|resume|skip|what.*(on|playing|watching))\b/.test(low))) ensure('theater');
   else if (musicAsk(text) || /\b(spotify|radio)\b/.test(low) || (/\b(pause|resume|skip|stop)\b/.test(low) && /\b(music|song|track|playing)\b/.test(low))) ensure('music');
   if (/\b(persona|personality|character prompt)\b/.test(low) && /\b(update|change|edit|rewrite|more |less )\b/.test(low)) ensure('update_persona');
+  // his shopping list (shopping.js)
+  if (/\b(shopping list|grocer(y|ies) list|to (the|my) list|off (the|my) list|i'?m at (the )?(supermarket|shop|store|alphamega|lidl|sklavenitis|metro)|going (to )?(the )?(supermarket|shops?|store))\b/.test(low)) ensure('shopping');
   // a link he pastes (YouTube goes to the theater / music): read it (attachments.js)
   if (/(https?:\/\/|\bwww\.)\S+/i.test(String(text || '')) && !/youtu\.?be/i.test(String(text || ''))) ensure('read_link');
   // singing in her own voice: "sing X", and "stop singing" (singvoice.js)
@@ -295,6 +298,16 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // Shot one: decide what, if anything, to do. Banter cues never take actions.
   const actions = available.filter((t) => !ALWAYS.includes(t.function.name));
   const plan = cue || !actions.length ? { search: null, tools: [] } : await planTurn(history, speaker, text, actions);
+  // "I'm at the supermarket": his shopping list goes to his phone before she answers (shopping.js; left to her, she
+  // picked the wrong action or said she couldn't, 2026-11-23)
+  let shopPrefired = false;
+  if (!cue && perms.owner && /\b(i'?m|i am|just got|now) (at|in) (the )?(supermarket|shop|store|alphamega|lidl|sklavenitis|metro|papantoniou|grocer'?s?)\b|\b(going|heading|off) (to )?(the )?(supermarket|shops?|store|alphamega|lidl|sklavenitis)\b/i.test(String(text || '')) && available.some((t) => t.function.name === 'shopping')) {
+    try {
+      const sent = await runTool('shopping', JSON.stringify({ action: 'send' }), toolCtx);
+      shopPrefired = !/error/i.test(String(sent).slice(0, 40));
+      userContent += `\n\n(Done before you answer: ${String(sent).replace(/^\[[^\]]*\]\s*/, '').split('\n')[0]} Don't send it again.)`;
+    } catch {}
+  }
   // a wrap-up he may be answering, or a brief / work question pending: the day tool in hand (daily.js)
   if (!cue && /save it with your day tool|your day tool, town/.test(dayBlock) && actions.some((t) => t.function.name === 'day') && !plan.tools.includes('day')) plan.tools.push('day');
   if (!cue) {
@@ -371,6 +384,7 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
 
   // Every call this turn, for the phantom check and sticky tools: tool -> succeeded at least once.
   const succeeded = new Map();
+  if (shopPrefired) succeeded.set('shopping', true);
   if (theaterPrefired) {
     if (!toolFailed(theaterPrefired)) succeeded.set('theater', true);
     else succeeded.set('theater', false);
@@ -619,6 +633,12 @@ const CLAIMS = {
   avatar_mode: /\bavatar mode (is )?(now )?(on|off)\b/i,
   rebuild_memories: /\b(started|kicked off) (the )?(memory )?rebuild\b/i,
 };
+// Newer tools that make the same claims true (2026-11-23: "Sent it to your phone" after the shopping list was DMed
+// was "corrected" into "it didn't go through", because only send_file counted)
+const ALSO_PROVES = {
+  send_file: ['shopping', 'send_project', 'sing_song', 'generate_music'],
+  obligations: ['shopping', 'todo', 'reminder', 'idea'],
+};
 let claimOverrides = null;
 function phantomClaim(reply, succeeded) {
   if (claimOverrides === null) {
@@ -630,7 +650,7 @@ function phantomClaim(reply, succeeded) {
   }
   for (const [tool, re] of Object.entries({ ...CLAIMS, ...claimOverrides })) {
     const m = String(reply).match(re);
-    if (m && !succeeded.get(tool)) return { tool, claim: m[0].trim() };
+    if (m && !succeeded.get(tool) && !(ALSO_PROVES[tool] || []).some((t) => succeeded.get(t))) return { tool, claim: m[0].trim() };
   }
   return null;
 }

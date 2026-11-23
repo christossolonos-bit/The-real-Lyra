@@ -329,8 +329,12 @@ async function dayTool(a, ctx) {
     // the town in whichever field she put it, or from his own words (she once sent it in another field, the tool
     // got an empty name, and the town was never saved)
     const wanted = [a.town, a.name, a.city, a.place, a.location].map((x) => String(x || '').trim()).find(Boolean);
-    const town = (wanted && await findTown(wanted).catch(() => null)) || await townFromWords(ctx?.userText);
-    if (!town) return wanted ? `Error: couldn't find a town called "${wanted}". Ask him how it's spelled.` : "Error: which town? Pass it as town (e.g. town: 'Paphos').";
+    // only a town his own message names (2026-11-23: with no town known, she made one up from an example); the
+    // dashboard or a script (no message) can still set it
+    const said = String(ctx?.userText ?? '');
+    const named = ctx?.userText === undefined || (wanted && said.toLowerCase().includes(wanted.toLowerCase().slice(0, 4)));
+    const town = (wanted && named && await findTown(wanted).catch(() => null)) || await townFromWords(said);
+    if (!town) return wanted && !named ? `Error: he didn't name "${wanted}" in this message. Don't guess his town; ask him which town he lives in.` : wanted ? `Error: couldn't find a town called "${wanted}". Ask him how it's spelled.` : "Error: which town? Ask him, then pass the town he names.";
     d.town = town;
     save(d);
     weatherCache = { at: 0, key: '', text: '' };

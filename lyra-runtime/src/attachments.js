@@ -165,7 +165,8 @@ export async function readAttachments(message, { owner, conversation }) {
           extra.push(`He sent a photo (kept as #${doc.id}). What you see in it (your own eyes, just now):\n${seen}\n` +
             `If he asks about something in it that this doesn't answer, look again with your documents tool (look, id ${doc.id}, and his question) rather than guessing.` +
             (schedule ? `\nIt's his work schedule. ${schedule}` : '') +
-            `\nIf it's a receipt or a bill, offer to log it with your money tool (shop, total, date, a category) and log it once he says yes (source receipt); if the total isn't clear, look again or ask.`);
+            `\nIf it's a receipt or a bill, offer to log it with your money tool (shop, total, date, a category) and log it once he says yes (source receipt); if the total isn't clear, look again or ask.` +
+            (await (async () => { try { const line = (await import('./shopping.js')).shoppingLine(); return line ? `\nIf it's a shop receipt: ${line} Tick off what it shows he bought, with your shopping tool (done).` : ''; } catch { return ''; } })()));
         } else {
           said.push(photoLine);
           extra.push(`They sent a photo. What you see in it (your own eyes, just now):\n${seen}`);
