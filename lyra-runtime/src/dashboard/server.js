@@ -571,6 +571,11 @@ function buildRoutes(bot) {
       return { ok: true, message: done.length ? `${done.join(' and ')}.` : "She wasn't singing anything." };
     }),
     r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
+    // The Birthdays page (/birthdays.html): a calendar of his family's birthdays and dates (2026-11-23)
+    r('GET', '/api/birthdays', async () => ({ people: (await import('../birthdays.js')).birthdaysAll() })),
+    r('POST', '/api/birthdays', async ({ body }) => (await import('../birthdays.js')).birthdayPut(null, body)),
+    r('PUT', '/api/birthdays/(?<id>\\d+)', async ({ params, body }) => (await import('../birthdays.js')).birthdayPut(params.id, body)),
+    r('DELETE', '/api/birthdays/(?<id>\\d+)', async ({ params }) => (await import('../birthdays.js')).birthdayDelete(params.id)),
     r('GET', '/api/pressure', () => pressure.snapshot()),
 
     // Video replies: the recorder page's event stream, its "recording started", and the clip itself.

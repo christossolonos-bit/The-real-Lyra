@@ -14,6 +14,7 @@ import { DATA_DIR, config } from './config.js';
 import { activity } from './events.js';
 import { personalSnapshot, presence, setAway, addReminder, finishTodos } from './personal.js';
 import { billsDue } from './finance.js';
+import { birthdaysSoon, birthdayTick } from './birthdays.js';
 
 const FILE = path.join(DATA_DIR, 'daily.json');
 const pad = (n) => String(n).padStart(2, '0');
@@ -226,6 +227,10 @@ export async function briefFacts() {
     const bills = billsDue(7);
     if (bills.length) lines.push(`Bills this week: ${bills.map((b) => `${b.name} €${b.amount} on ${nice(b.nextDue)}`).join('; ')}.`);
   } catch {}
+  try {
+    const soon = birthdaysSoon(14);
+    if (soon.length) lines.push(`Birthdays coming up: ${soon.join('; ')}.`);
+  } catch {}
   const w = await weatherLine();
   lines.push(w || (d.town ? '' : "Weather: you don't know his town yet; ask him once which town he's in (then your day tool, town)."));
   const last = d.journal.filter((j) => j.date < t).at(-1);
@@ -376,7 +381,16 @@ async function dayTool(a, ctx) {
     const finished = ids.length ? finishTodos(ids) : [];
     const left = personalSnapshot().todos;
     activity('daily', { message: `Wrap-up saved for ${night}${entry.feeling ? ` (${entry.feeling})` : ''}` });
-    return `Saved tonight's wrap-up.${finished.length ? ` Ticked off: ${finished.join('; ')}.` : ''}${left.length ? ` Still on the list for tomorrow: ${left.map((x) => x.text).join('; ')}.` : ''} Say good night warmly.`;
+    // Sunday night: a short recap of his week from the diary (diary.js)
+    let week = '';
+    if (new Date(`${night}T12:00`).getDay() === 0) {
+      try {
+        const { weekDiary } = await import('./diary.js');
+        const list = weekDiary(night);
+        if (list.length > 1) week = `\nIt's Sunday: after that, give him a short warm recap of his week (highs, lows, anything that came up more than once) from his diary:\n${list.map((e) => `${nice(e.date)}: ${e.text}`).join('\n')}`;
+      } catch {}
+    }
+    return `Saved tonight's wrap-up.${finished.length ? ` Ticked off: ${finished.join('; ')}.` : ''}${left.length ? ` Still on the list for tomorrow: ${left.map((x) => x.text).join('; ')}.` : ''} Say good night warmly.${week}`;
   }
   return 'Error: unknown action.';
 }
@@ -433,6 +447,7 @@ export function startDaily({ sendBrief }) {
       if (now >= start && now < end && !presence().away) { setAway(true, 'at work'); s.away = true; changed = true; }
       if (now >= end && s.away) { if (presence().how === 'at work') setAway(false, 'finished work'); s.away = false; changed = true; }
     }
+    try { birthdayTick(); } catch (err) { activity('error', { where: 'birthdays', message: err.message }); }
     // old shifts go after 60 days
     const cut = addDays(dayOf(), -60);
     if (d.shifts.some((s) => s.date < cut)) { d.shifts = d.shifts.filter((s) => s.date >= cut); changed = true; }
@@ -451,6 +466,9 @@ export function startDaily({ sendBrief }) {
   tick().catch(() => {});
   setInterval(() => tick().catch(() => {}), 60_000).unref();
 }
+
+// the nightly wrap-ups, oldest first (diary.js reads them as diary entries)
+export function journalEntries() { return load().journal; }
 
 export function dailySnapshot() {
   const d = load();

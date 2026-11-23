@@ -127,6 +127,8 @@ export async function planTurn(history, speaker, text, tools) {
         `- documents for questions about a file or photo he sent (what it says or shows), even if asked before.\n` +
         `- read_link when he shares a web link (not YouTube) to read, summarise or ask about.\n` +
         `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it).\n` +
+        `- diary when he asks you to write something in his diary, or asks what he did / how he felt on a day or this week, or for a recap of his week.\n` +
+        `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
         `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
@@ -168,6 +170,9 @@ export async function planTurn(history, speaker, text, tools) {
   if (/\b(persona|personality|character prompt)\b/.test(low) && /\b(update|change|edit|rewrite|more |less )\b/.test(low)) ensure('update_persona');
   // his shopping list (shopping.js)
   if (/\b(shopping list|grocer(y|ies) list|to (the|my) list|off (the|my) list|i'?m at (the )?(supermarket|shop|store|alphamega|lidl|sklavenitis|metro)|going (to )?(the )?(supermarket|shops?|store))\b/.test(low)) ensure('shopping');
+  // his diary and his family's birthdays (diary.js, birthdays.js)
+  if (/\b(diary|dear diary|what did i (do|get up to)|how was my week|recap (of )?my week|my week (so far|recap))\b/.test(low)) ensure('diary');
+  if (/\b(birthday|b-?day|anniversary|name ?day|born on)\b/.test(low)) ensure('birthdays');
   // a link he pastes (YouTube goes to the theater / music): read it (attachments.js)
   if (/(https?:\/\/|\bwww\.)\S+/i.test(String(text || '')) && !/youtu\.?be/i.test(String(text || ''))) ensure('read_link');
   // singing in her own voice: "sing X", and "stop singing" (singvoice.js)
