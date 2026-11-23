@@ -126,7 +126,8 @@ export async function planTurn(history, speaker, text, tools) {
         `- money for anything about his money: spending, bills, budgets, account balances, money in or moved, "how much do I have", "check my finance". Pick it even if it was answered earlier in the conversation: balances change, and the answer must come from the tracker, never from memory.\n` +
         `- documents for questions about a file or photo he sent (what it says or shows), even if asked before.\n` +
         `- read_link when he shares a web link (not YouTube) to read, summarise or ask about.\n` +
-        `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it).\n` +
+        `- reminder when he asks to be reminded of something at a time ("remind me at 9", "don't let me forget…tonight"), or gives a time for something he wants to do or buy ("for tonight at 9"); also to list or cancel reminders.\n` +
+        `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it). If he gives a time with it, also reminder.\n` +
         `- diary when he asks you to write something in his diary, or asks what he did / how he felt on a day or this week, or for a recap of his week.\n` +
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
@@ -173,6 +174,10 @@ export async function planTurn(history, speaker, text, tools) {
   // his diary and his family's birthdays (diary.js, birthdays.js)
   if (/\b(diary|dear diary|what did i (do|get up to)|how was my week|recap (of )?my week|my week (so far|recap))\b/.test(low)) ensure('diary');
   if (/\b(birthday|b-?day|anniversary|name ?day|born on)\b/.test(low)) ensure('birthdays');
+  // reminders: asked for, or a time given with something to do or buy
+  const timeSaid = /\b(at|by|around|before|for)\s+(around\s+|about\s+)?\d{1,2}([:.]\d{2})?\s*(o'?clock|am|pm|a\.m\.?|p\.m\.?)?(\s|$|[,.!?])|\b(tonight|this evening|tomorrow( morning)?) at\b|\bin (an? |\d+ )(hour|minute)s?\b/i.test(low);
+  if (/\b(remind(er)?s?|don'?t let me forget|make sure i (don'?t forget|remember))\b/.test(low)) ensure('reminder');
+  else if (timeSaid && /\b(list|buy|get|pick up|shopping|need to|have to|got to|gotta|call|take)\b/.test(low)) ensure('reminder');
   // a link he pastes (YouTube goes to the theater / music): read it (attachments.js)
   if (/(https?:\/\/|\bwww\.)\S+/i.test(String(text || '')) && !/youtu\.?be/i.test(String(text || ''))) ensure('read_link');
   // singing in her own voice: "sing X", and "stop singing" (singvoice.js)
@@ -627,7 +632,8 @@ const CLAIMS = {
   send_file: /\b(i('ve| have)? sent|sent (it|that|you)|it'?s attached|attached (it|the file)|here'?s the file)\b/i,
   send_project: /\b(zipped (it|them|up)|sent (you )?the (project|zip))\b/i,
   files: /\b(i('ve| have)? (saved|written|wrote|created|edited|updated|changed|moved|renamed|copied)\b.{0,40}\b(file|folder|line|script|code|config)|(file|folder|script)\b.{0,25}\b(is |has been )?(saved|created|updated|edited))\b/i,
-  obligations: /\b(on (my|the) (list|to-?do)|added (it|that|this) to (my|the) list|it'?s on my list|i'?ve (set|added) (a |the )?reminder)\b/i,
+  obligations: /\b(on (my|the) (list|to-?do)|added (it|that|this) to (my|the) list|it'?s on my list)\b/i,
+  reminder: /\b(i'?ll remind you|i will remind you|i'?ll (give you a )?(nudge|ping) you|i'?ve (set|added|scheduled) (a |the |your |that )?reminder|reminder('?s| is| has been) set|i'?ll set (it|that|a reminder|the reminder)( up)?( now)? for)\b/i,
   checkin_consent: /\b(saved (it )?(to|on) your card|on your card|got it saved|noted (it )?on your (card|profile))\b/i,
   music: /\b(it'?s playing|now playing|playing (it )?now|started playing|i'?ve stopped|stopped (the )?(song|music|it)|paused (it|the song|the music))\b/i,
   theater: /\b(it'?s (on|playing) in (the |your )?theater|theater('?s| is) (up|open|playing)|put (it|that) on in (the )?theater)\b/i,
@@ -643,6 +649,7 @@ const CLAIMS = {
 const ALSO_PROVES = {
   send_file: ['shopping', 'send_project', 'sing_song', 'generate_music'],
   obligations: ['shopping', 'todo', 'reminder', 'idea'],
+  reminder: ['obligations'],
 };
 let claimOverrides = null;
 function phantomClaim(reply, succeeded) {
