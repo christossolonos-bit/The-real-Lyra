@@ -22,6 +22,7 @@ const FIRST_LOOK_DAYS = 3;   // on the first check, only comments this recent ge
 const MAX_DRAFTS_PER_CHECK = 5;
 const DRAFT_DAYS = 3;        // a draft he never answered expires
 const MAX_IDEAS = 4;         // denied this many times for one comment, she leaves it
+const LOOK_BACK_DAYS = 7;    // a check he asks for also drafts for unanswered comments this recent
 
 const readJson = (f, d) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { mkdirSync(YT_DIR, { recursive: true }); writeFileSync(f, JSON.stringify(v, null, 1)); };
@@ -135,12 +136,16 @@ async function compose(draft, meTitle, kind, v, extra, avoid = []) {
 }
 
 // draft(cue) -> her words for it (index.js: respond with a cue); dm(text) -> a DM to Chris
-export async function checkNow({ draft, dm, captions = captionsText }) {
+// lookBack (days): a check he asked for also looks at recent comments she never drafted for, not only new ones
+// (2026-11-24: the newest were 4 days old, so his first "Check now" found nothing)
+export async function checkNow({ draft, dm, captions = captionsText, lookBack = 0 }) {
   const s = load();
   if (!s.channel?.id) return 'No channel to watch yet: he has to give you his channel link.';
   const me = await whoAmI(s);
   const first = !s.started;
-  const since = first ? Date.now() - FIRST_LOOK_DAYS * 86_400_000 : s.started - 60_000;
+  const since = lookBack ? Date.now() - lookBack * 86_400_000 : first ? Date.now() - FIRST_LOOK_DAYS * 86_400_000 : s.started - 60_000;
+  // comments she already has a draft for (any status: waiting, posted, denied, no reply)
+  const drafted = new Set(s.drafts.flatMap((d) => [d.commentId, !d.commentId && d.kind === 'reply' ? d.parentId : null]).filter(Boolean));
   const made = [];
   const context = new Map();
   const about = async (videoId) => {
@@ -157,7 +162,7 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
     const videoId = t.snippet.videoId;
     const replies = t.replies?.comments || [];
     const mine = (c) => c.snippet.authorChannelId?.value === me.id;
-    const fresh = (c) => !s.seen[c.id] && Date.parse(c.snippet.publishedAt) >= since && !mine(c);
+    const fresh = (c) => (lookBack ? !drafted.has(c.id) : !s.seen[c.id]) && Date.parse(c.snippet.publishedAt) >= since && !mine(c);
     // a reply to her in a thread she's in (the newest reply isn't hers), else a new top-level comment she hasn't answered
     const lastReply = replies.slice().sort((a, b) => Date.parse(a.snippet.publishedAt) - Date.parse(b.snippet.publishedAt)).at(-1);
     const inThread = mine(top) || replies.some(mine);
@@ -171,7 +176,7 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
       extra: `${inThread ? `The thread starts: "${clean(top.snippet.textOriginal)}"\n` : ''}${who} wrote: "${said}"\nReply to ${who}.` };
     const text = await talk(ask.kind, v, ask.extra);
     if (!text) continue;
-    const d = { id: nextId(s.drafts), kind: 'reply', videoId, videoTitle: v.title, description: v.description, parentId: top.id, author: who, comment: said.slice(0, 500), text, ask, at: Date.now(), status: 'pending' };
+    const d = { id: nextId(s.drafts), kind: 'reply', videoId, videoTitle: v.title, description: v.description, parentId: top.id, commentId: target.id, author: who, comment: said.slice(0, 500), text, ask, at: Date.now(), status: 'pending' };
     s.drafts.push(d);
     made.push(d);
   }
@@ -205,7 +210,8 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
     try { await dm(draftCard(d)); } catch (err) { activity('error', { where: 'youtube dm', message: err.message }); }
   }
   if (made.length) activity('youtube', { message: `${made.length} YouTube draft${made.length > 1 ? 's' : ''} sent to Chris for approval` });
-  return made.length ? `Drafted ${made.length} and sent them to him for approval.` : 'No new comments or videos.';
+  return made.length ? `Drafted ${made.length} and sent them to him for approval.`
+    : lookBack ? `No comments from the last ${lookBack} days without a reply.` : 'No new comments or videos.';
 }
 
 const HOW = 'Say **post it**, **change it to …**, **another** (a different idea) or **skip** (no reply), or use the dashboard\'s YouTube page.';
@@ -255,7 +261,8 @@ export function anotherIdea(id) {
 let checkHook = null;
 export function startYoutube({ draft, dm, captions = captionsText }) {
   let busy = false;
-  const tick = async () => {
+  // asked = he asked for it (Check now / "check my comments"): recent comments too, not only new ones
+  const tick = async (asked = false) => {
     if (busy || !signedIn()) return 'Not set up yet: she isn\'t signed in to YouTube.';
     const want = load();
     if (!want.channel?.id && want.wantChannel) {
@@ -263,9 +270,9 @@ export function startYoutube({ draft, dm, captions = captionsText }) {
     }
     if (!load().channel?.id) return 'Not set up yet: no channel to watch.';
     busy = true;
-    try { return await checkNow({ draft, dm, captions }); } catch (err) { activity('error', { where: 'youtube', message: err.message }); return `Error: ${err.message}`; } finally { busy = false; }
+    try { return await checkNow({ draft, dm, captions, lookBack: asked ? LOOK_BACK_DAYS : 0 }); } catch (err) { activity('error', { where: 'youtube', message: err.message }); return `Error: ${err.message}`; } finally { busy = false; }
   };
-  checkHook = tick;
+  checkHook = () => tick(true);
   deps = { draft, dm, captions };
   setTimeout(() => tick(), 60_000).unref();
   setInterval(() => tick(), CHECK_MS).unref();
