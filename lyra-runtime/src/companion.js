@@ -129,6 +129,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- reminder when he asks to be reminded of something at a time ("remind me at 9", "don't let me forget…tonight"), or gives a time for something he wants to do or buy ("for tonight at 9"); also to list or cancel reminders.\n` +
         `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it). If he gives a time with it, also reminder.\n` +
         `- diary when he asks you to write something in his diary, or asks what he did / how he felt on a day or this week, or for a recap of his week.\n` +
+        `- youtube for your YouTube account on his channel: his answer to a reply or comment you drafted ("post it", "change it to…", "skip"), his channel link to watch, or what's waiting.\n` +
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
@@ -171,6 +172,11 @@ export async function planTurn(history, speaker, text, tools) {
   if (/\b(persona|personality|character prompt)\b/.test(low) && /\b(update|change|edit|rewrite|more |less )\b/.test(low)) ensure('update_persona');
   // his shopping list (shopping.js)
   if (/\b(shopping list|grocer(y|ies) list|to (the|my) list|off (the|my) list|i'?m at (the )?(supermarket|shop|store|alphamega|lidl|sklavenitis|metro)|going (to )?(the )?(supermarket|shops?|store))\b/.test(low)) ensure('shopping');
+  // her YouTube drafts waiting for his OK (yt-channel.js)
+  try {
+    const yt = await import('./yt-channel.js');
+    if ((yt.youtubePending() && /\b(post|yes|yeah|yep|skip|change|reply|comment|go ahead|send it|do it|ok(ay)?|looks good|#\d+)\b/.test(low)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
+  } catch {}
   // his diary and his family's birthdays (diary.js, birthdays.js)
   if (/\b(diary|dear diary|what did i (do|get up to)|how was my week|recap (of )?my week|my week (so far|recap))\b/.test(low)) ensure('diary');
   if (/\b(birthday|b-?day|anniversary|name ?day|born on)\b/.test(low)) ensure('birthdays');
@@ -239,9 +245,12 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   if (!cue && perms.owner && character.main) {
     try { dayBlock = await (await import('./daily.js')).dayPrompt(text); } catch (err) { activity('error', { where: 'day', message: err.message }); }
   }
+  let ytBlock = '';
+  if (!cue && perms.owner && character.main) { try { ytBlock = (await import('./yt-channel.js')).youtubePrompt(); } catch {} }
   systemExtra = [
     systemExtra,
     dayBlock,
+    ytBlock,
     character.main && continuity.continuityBlock({ conversation, speakerName: cue ? null : speaker.name, speakerLastSeen, convLastActive }),
     obligationsPrompt(speaker, due, priorities),
     scratch.promptBlock(conversation),
@@ -633,6 +642,7 @@ const CLAIMS = {
   send_project: /\b(zipped (it|them|up)|sent (you )?the (project|zip))\b/i,
   files: /\b(i('ve| have)? (saved|written|wrote|created|edited|updated|changed|moved|renamed|copied)\b.{0,40}\b(file|folder|line|script|code|config)|(file|folder|script)\b.{0,25}\b(is |has been )?(saved|created|updated|edited))\b/i,
   obligations: /\b(on (my|the) (list|to-?do)|added (it|that|this) to (my|the) list|it'?s on my list)\b/i,
+  youtube: /\b(i'?ve (posted|replied|commented)|(posted|replied) (it|that|on youtube)|it'?s (posted|up) on youtube|reply is (up|posted))\b/i,
   reminder: /\b(i'?ll remind you|i will remind you|i'?ll (give you a )?(nudge|ping) you|i'?ve (set|added|scheduled) (a |the |your |that )?reminder|reminder('?s| is| has been) set|i'?ll set (it|that|a reminder|the reminder)( up)?( now)? for)\b/i,
   checkin_consent: /\b(saved (it )?(to|on) your card|on your card|got it saved|noted (it )?on your (card|profile))\b/i,
   music: /\b(it'?s playing|now playing|playing (it )?now|started playing|i'?ve stopped|stopped (the )?(song|music|it)|paused (it|the song|the music))\b/i,

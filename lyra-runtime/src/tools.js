@@ -35,6 +35,7 @@ import { DAILY_TOOLS } from './daily.js';
 import { SHOPPING_TOOLS } from './shopping.js';
 import { DIARY_TOOLS } from './diary.js';
 import { BIRTHDAY_TOOLS } from './birthdays.js';
+import { YOUTUBE_TOOLS } from './yt-channel.js';
 import { DOCUMENT_TOOLS } from './attachments.js';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // Discord's upload limit for bots in most servers
@@ -852,7 +853,7 @@ export const TOOLS = {
 };
 
 // Chris's personal skills: reminders, to-dos, ideas, wellbeing check-ins (personal.js)
-Object.assign(TOOLS, PERSONAL_TOOLS, DOCUMENT_TOOLS, FINANCE_TOOLS, DAILY_TOOLS, SHOPPING_TOOLS, DIARY_TOOLS, BIRTHDAY_TOOLS);
+Object.assign(TOOLS, PERSONAL_TOOLS, DOCUMENT_TOOLS, FINANCE_TOOLS, DAILY_TOOLS, SHOPPING_TOOLS, DIARY_TOOLS, BIRTHDAY_TOOLS, YOUTUBE_TOOLS);
 
 export function enabledTools(ctx = {}) {
   return Object.values(TOOLS)

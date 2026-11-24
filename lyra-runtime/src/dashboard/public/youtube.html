@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra YouTube</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --warn:#c27c0e; --bad:#c43c3c; --her:#7c5cff; --quote:#f0f0f4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --warn:#f0b445; --bad:#ff6b6b; --her:#a58bff; --quote:#0d161c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:14px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header h1 { margin:0; font-size:18px; }
+  header .right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  button { font:inherit; cursor:pointer; }
+  .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:6px 12px; font-size:14px; }
+  .btn.accept { background:var(--good); border-color:var(--good); color:#fff; }
+  .btn.deny { color:var(--bad); border-color:var(--bad); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  main { max-width:860px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .status { display:grid; gap:4px; font-size:14px; }
+  .status .ok { color:var(--good); } .status .no { color:var(--warn); }
+  .setup { margin-top:10px; font-size:14px; color:var(--muted); }
+  .chan { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .chan input { flex:1 1 240px; min-width:0; font:inherit; font-size:14px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+  .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+  .tabs button { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:999px; padding:5px 12px; font-size:14px; }
+  .tabs button.on { background:var(--accent); color:#001; border-color:var(--accent); }
+  .draft { border-bottom:1px solid var(--border); padding:16px 0; display:grid; gap:8px; }
+  .draft:last-child { border-bottom:0; }
+  .draft .top { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .draft .video { font-weight:600; color:var(--text); text-decoration:none; overflow-wrap:anywhere; }
+  .draft .video:hover { text-decoration:underline; }
+  .draft .when { color:var(--muted); font-size:13px; margin-left:auto; }
+  .kind { font-size:11px; border-radius:6px; padding:1px 6px; border:1px solid var(--border); color:var(--muted); }
+  .kind.comment { color:var(--her); border-color:var(--her); }
+  .viewer { background:var(--quote); border-left:3px solid var(--border); border-radius:6px; padding:8px 10px; font-size:14px; overflow-wrap:anywhere; white-space:pre-wrap; }
+  .viewer b { display:block; font-size:12px; color:var(--muted); font-weight:600; margin-bottom:2px; }
+  .label { font-size:12px; color:var(--her); font-weight:600; }
+  textarea { width:100%; min-height:74px; resize:vertical; font:inherit; font-size:15px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  textarea:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .done-text { white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; }
+  .acts { display:flex; gap:8px; justify-content:flex-end; align-items:center; flex-wrap:wrap; }
+  .acts .edited { margin-right:auto; font-size:12px; color:var(--warn); }
+  .state { font-size:12px; font-weight:600; }
+  .state.posted { color:var(--good); } .state.skipped, .state.expired { color:var(--muted); }
+  .empty { color:var(--muted); }
+  .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
+  .msg.show { opacity:1; }
+  @media (max-width:560px) { .draft .when { margin-left:0; width:100%; } .acts .btn { flex:1; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <h1>YouTube</h1>
+  <div class="right"><button class="btn" id="check" title="Look for new comments now instead of waiting for the next 15-minute check">Check now</button></div>
+</header>
+<main>
+  <section class="card">
+    <h2>Her account</h2>
+    <div class="status" id="status"></div>
+  </section>
+  <section class="card">
+    <div class="tabs" id="tabs">
+      <button data-f="pending" class="on">Waiting</button>
+      <button data-f="posted">Posted</button>
+      <button data-f="skipped">Denied</button>
+    </div>
+  </section>
+  <section class="card">
+    <h2 id="count">Waiting for you</h2>
+    <div id="list"></div>
+  </section>
+</main>
+<div class="msg" id="msg"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let data = { ready: {}, drafts: [] }, filter = 'pending';
+const edits = new Map(); // text he's changed but not accepted yet, kept across refreshes
+
+function toast(t) { const m = $('#msg'); m.textContent = t; m.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => m.classList.remove('show'), 3500); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const when = (t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+async function load() { data = await api('GET', '/api/youtube'); render(); }
+
+function render() {
+  const r = data.ready || {};
+  const line = (ok, yes, no) => `<div class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '•'} ${ok ? yes : no}</div>`;
+  $('#status').innerHTML =
+    line(r.client, 'Google app connected', 'Google app not set up yet (the OAuth client file)') +
+    line(r.signedIn, `Signed in${r.me ? ` as <b>${esc(r.me.title)}</b>` : ''}`, 'Not signed in: run <b>Sign in Lyra YouTube.bat</b>') +
+    line(r.channel, r.channel ? `Watching <b>${esc(r.channel.title)}</b>${r.channel.handle ? ` (${esc(r.channel.handle)})` : ''}, every 15 minutes` : '', r.wantChannel ? `Will watch <b>${esc(r.wantChannel)}</b> once she's signed in` : 'No channel to watch yet') +
+    `<div class="chan"><input id="link" placeholder="Your channel link, e.g. https://www.youtube.com/@name" value="" aria-label="Channel link"><button class="btn" id="setChan">${r.channel ? 'Change channel' : 'Watch this channel'}</button></div>`;
+  $('#setChan').onclick = async () => {
+    const link = $('#link').value.trim();
+    if (!link) return toast('Paste your channel link first.');
+    try { toast((await api('POST', '/api/youtube/channel', { link })).message); load(); } catch (err) { toast(err.message); }
+  };
+  $('#check').disabled = !(r.signedIn && r.channel);
+
+  const counts = { pending: 0, posted: 0, skipped: 0 };
+  for (const d of data.drafts) counts[d.status === 'expired' ? 'skipped' : d.status] = (counts[d.status === 'expired' ? 'skipped' : d.status] || 0) + 1;
+  for (const b of $('#tabs').children) {
+    const n = counts[b.dataset.f] || 0;
+    b.textContent = `${{ pending: 'Waiting', posted: 'Posted', skipped: 'Denied' }[b.dataset.f]}${n ? ` (${n})` : ''}`;
+    b.classList.toggle('on', b.dataset.f === filter);
+  }
+  const list = data.drafts.filter((d) => (filter === 'skipped' ? ['skipped', 'expired'].includes(d.status) : d.status === filter));
+  $('#count').textContent = { pending: 'Waiting for you', posted: 'Posted', skipped: 'Denied or expired' }[filter];
+  $('#list').innerHTML = list.length ? list.map(card).join('') : `<p class="empty">${filter === 'pending' ? 'Nothing waiting. New comments on your videos show up here for you to accept or deny.' : 'Nothing here yet.'}</p>`;
+  for (const ta of document.querySelectorAll('textarea')) ta.oninput = () => { edits.set(Number(ta.dataset.id), ta.value); markEdited(ta); };
+  for (const ta of document.querySelectorAll('textarea')) markEdited(ta);
+}
+
+function markEdited(ta) {
+  const d = data.drafts.find((x) => x.id === Number(ta.dataset.id));
+  const tag = ta.closest('.draft').querySelector('.edited');
+  if (tag) tag.hidden = !d || ta.value.trim() === d.text.trim();
+}
+
+function card(d) {
+  const url = `https://www.youtube.com/watch?v=${encodeURIComponent(d.videoId)}${d.status === 'posted' && d.postedId ? `&lc=${encodeURIComponent(d.postedId)}` : d.parentId ? `&lc=${encodeURIComponent(d.parentId)}` : ''}`;
+  const head = `<div class="top">
+      <span class="kind ${d.kind}">${d.kind === 'reply' ? 'Reply' : 'First comment'}</span>
+      <a class="video" href="${url}" target="_blank" rel="noopener">${esc(d.videoTitle)}</a>
+      <span class="when">${when(d.at)}</span>
+    </div>
+    ${d.kind === 'reply' ? `<div class="viewer"><b>${esc(d.author)} wrote</b>${esc(d.comment)}</div>` : ''}`;
+  if (d.status !== 'pending') {
+    return `<div class="draft">${head}
+      <div class="label">Lyra ${d.status === 'posted' ? 'posted' : 'wanted to say'}</div>
+      <div class="done-text">${esc(d.posted || d.text)}</div>
+      <div class="acts"><span class="state ${d.status}">${{ posted: `Posted ${d.postedAt ? when(d.postedAt) : ''}`, skipped: 'Denied', expired: 'Expired (not answered in 3 days)' }[d.status]}</span></div>
+    </div>`;
+  }
+  return `<div class="draft" data-id="${d.id}">${head}
+    <div class="label">Lyra's ${d.kind === 'reply' ? 'reply' : 'comment'} (you can edit it)</div>
+    <textarea data-id="${d.id}" maxlength="1500" aria-label="Lyra's comment">${esc(edits.get(d.id) ?? d.text)}</textarea>
+    <div class="acts">
+      <span class="edited" hidden>Edited: your version will be posted</span>
+      <button class="btn deny" data-act="deny" data-id="${d.id}">✕ Deny</button>
+      <button class="btn accept" data-act="accept" data-id="${d.id}">✓ Accept and post</button>
+    </div>
+  </div>`;
+}
+
+$('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { filter = b.dataset.f; render(); } };
+$('#list').onclick = async (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const id = Number(b.dataset.id);
+  const row = b.closest('.draft');
+  row.querySelectorAll('button').forEach((x) => (x.disabled = true));
+  try {
+    const r = b.dataset.act === 'accept'
+      ? await api('POST', `/api/youtube/${id}/accept`, { text: row.querySelector('textarea').value })
+      : await api('POST', `/api/youtube/${id}/deny`);
+    edits.delete(id);
+    toast(r.message);
+    await load();
+  } catch (err) {
+    toast(err.message);
+    row.querySelectorAll('button').forEach((x) => (x.disabled = false));
+  }
+};
+$('#check').onclick = async () => {
+  $('#check').disabled = true; $('#check').textContent = 'Checking…';
+  try { toast((await api('POST', '/api/youtube/check')).message); await load(); } catch (err) { toast(err.message); }
+  $('#check').textContent = 'Check now'; $('#check').disabled = false;
+};
+load().catch((err) => toast(`Couldn't load: ${err.message}`));
+// refresh while he isn't typing in a draft
+setInterval(() => { if (!document.activeElement || document.activeElement.tagName !== 'TEXTAREA') load().catch(() => {}); }, 30_000);
+</script>
+</body>
+</html>

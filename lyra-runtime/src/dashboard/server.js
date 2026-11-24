@@ -576,6 +576,12 @@ function buildRoutes(bot) {
     r('POST', '/api/birthdays', async ({ body }) => (await import('../birthdays.js')).birthdayPut(null, body)),
     r('PUT', '/api/birthdays/(?<id>\\d+)', async ({ params, body }) => (await import('../birthdays.js')).birthdayPut(params.id, body)),
     r('DELETE', '/api/birthdays/(?<id>\\d+)', async ({ params }) => (await import('../birthdays.js')).birthdayDelete(params.id)),
+    // The YouTube page (/youtube.html): her drafted comments on his channel, accepted or denied by him (2026-11-24)
+    r('GET', '/api/youtube', async () => (await import('../yt-channel.js')).youtubeSnapshot()),
+    r('POST', '/api/youtube/(?<id>\\d+)/accept', async ({ params, body }) => (await import('../yt-channel.js')).acceptDraft(params.id, body.text)),
+    r('POST', '/api/youtube/(?<id>\\d+)/deny', async ({ params }) => (await import('../yt-channel.js')).denyDraft(params.id)),
+    r('POST', '/api/youtube/check', async () => (await import('../yt-channel.js')).checkFromPage()),
+    r('POST', '/api/youtube/channel', async ({ body }) => (await import('../yt-channel.js')).channelFromPage(body.link)),
     r('GET', '/api/pressure', () => pressure.snapshot()),
 
     // Video replies: the recorder page's event stream, its "recording started", and the clip itself.

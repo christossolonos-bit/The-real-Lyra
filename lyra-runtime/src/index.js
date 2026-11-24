@@ -110,6 +110,24 @@ activity('sleep', { message: 'Sleep cycles armed' });
   });
 }
 
+// Lyra's YouTube account on Chris's channel (yt-channel.js): drafts replies to his viewers' comments and first
+// comments on his new videos, and DMs each to him; nothing is posted without his OK
+{
+  const { startYoutube } = await import('./yt-channel.js');
+  const { respond } = await import('./companion.js');
+  startYoutube({
+    draft: async (cue) => {
+      const owner = config.ownerIds[0];
+      return respond({ conversation: 'youtube', speaker: { id: owner, name: 'Chris' }, cue });
+    },
+    dm: async (text) => {
+      const owner = config.ownerIds[0];
+      if (!bot.client || !owner) throw new Error('Discord offline: YouTube draft not sent');
+      await (await bot.client.users.fetch(owner)).send(text.slice(0, 1900));
+    },
+  });
+}
+
 // Chris's spending tracker (finance.js): bills due tomorrow become reminders; budget warnings, bills that need an
 // amount and the monthly summary come as a Discord DM
 {
