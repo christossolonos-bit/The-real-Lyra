@@ -40,20 +40,43 @@ const say = (who, text, extra = {}) => {
   if (lab.transcript.length > 200) lab.transcript.splice(0, lab.transcript.length - 200);
 };
 
+// Growing up (2026-11-25): Lyra teaches longer answers as the baby knows more phrases, so its answers get longer
+// over the sessions. Each stage sets how she talks to it and what a good answer from it looks like.
+export const STAGES = [
+  { name: 'baby', from: 0, length: '1 short sentence',
+    lyra: 'Keep everything very short and simple: plain spoken English, 1 short sentence, one idea at a time, the kind of sentence you want it to say back.',
+    better: 'one short, simple sentence, like a toddler ("I feel happy." or "Yes, I like rain.").' },
+  { name: 'toddler', from: 40, length: '1 or 2 short sentences',
+    lyra: 'Talk simply, 1 or 2 short sentences. Start asking "why" and "what happened" questions, and help it say a reason.',
+    better: 'one or two short sentences, often with a reason ("I like rain because it sounds calm." or "I was sad. My toy broke.").' },
+  { name: 'child', from: 120, length: '2 or 3 sentences',
+    lyra: 'Talk like to a young child, 2 or 3 sentences. Ask it to tell you about things, to describe, to remember, and to ask you something back.',
+    better: 'two or three sentences: a little story, a description or a feeling with a reason, sometimes ending with a question back to you ("I played with blocks today. I built a tall tower. Do you like towers, Lyra?").' },
+  { name: 'big kid', from: 300, length: '3 to 5 sentences',
+    lyra: 'Talk naturally, as to a bright older child. Ask what it thinks and why, ask it to compare things, imagine, and explain.',
+    better: 'three to five sentences with its own opinion, a reason and an example; it can be curious and ask you questions.' },
+];
+export function stageOf(phrases = 0) {
+  const i = STAGES.reduce((k, s, n) => (phrases >= s.from ? n : k), 0);
+  const next = STAGES[i + 1];
+  return { ...STAGES[i], level: i + 1, of: STAGES.length, next: next ? { name: next.name, at: next.from } : null };
+}
+
 // Lyra's side: her next line, and the answer she'd have liked to her previous line. Big model first, Lightning when
 // it's slow (the same free NVIDIA key as her replies)
 async function lyraTurn(prevLine) {
   const { nvidiaJson } = await import('./llm.js');
   const recent = lab.transcript.slice(-12).map((t) => `${t.who === 'lyra' ? 'Lyra' : 'Baby'}: ${t.text}`).join('\n');
+  const st = stageOf(baby.stats().phrases);
   const messages = [
     { role: 'system', content:
-      'You are Lyra, a warm AI, teaching a newborn mind (the Baby) to talk. The Baby has no language model: it learns ONLY by copying the exact sentences you use as good answers, and it reuses them later when a moment looks similar. ' +
-      'So keep everything short and simple: plain spoken English, 1 or 2 short sentences, one idea at a time, the kind of sentences you want it to be able to say back. ' +
+      `You are Lyra, a warm AI, teaching a young mind (the Baby) to talk. It is at the ${st.name.toUpperCase()} stage. The Baby has no language model: it learns ONLY by copying the exact sentences you use as good answers, and it reuses them later when a moment looks similar. ` +
+      `${st.lyra} ` +
       'Each turn: react to what the Baby just said (praise any attempt, gently say how to say it better), then move on: a new simple question or thought' +
       `${lab.topic ? ` about ${lab.topic}` : ''}. Teach like a parent, not a drill: ask real questions in different ways ("How do you feel when…?", "What do you like…?", "Do you…?", "Why…?"), ` +
       'never "Can you say…" or "repeat after me". Every few turns, a new small situation (rain, a lost toy, a friend, food, bedtime…), and sometimes ask about something it learned earlier in a new way, to see if it can use it. Never say the same line twice. ' +
-      '"better" is how a young child would answer your line: short, simple, natural (like "I feel happy." or "Yes, I like rain."). Never use the real name of your creator or anything private.\n' +
-      'Reply with JSON only: {"better": "<the short answer you would have liked the Baby to give to your previous line, in first person as the Baby, 1 sentence; empty if there was no previous line>", "say": "<your next line to the Baby>"}' },
+      `"better" is how the Baby should answer your line at this stage: ${st.better} Never use the real name of your creator or anything private.\n` +
+      `Reply with JSON only: {"better": "<the answer you would have liked the Baby to give to your previous line, in first person as the Baby, ${st.length}; empty if there was no previous line>", "say": "<your next line to the Baby>"}` },
     { role: 'user', content: `${recent ? `The conversation so far:\n${recent}\n\n` : 'This is the very start: greet the Baby and ask it something simple.\n'}${prevLine ? `Your previous line was: "${prevLine}"` : ''}` },
   ];
   // the big model only while it's quick: once it's slow (here or in her replies), Lightning for 10 minutes, so a turn
@@ -99,12 +122,18 @@ async function run() {
       const turn = await lyraTurn(prev);
       lab.lastTurn = { ...turn, prev };
       if (prev && turn.better) {
+        const before = stageOf(baby.stats().phrases).level;
         const learned = baby.observe({ speaker: { id: 'lyra', name: 'Lyra' }, text: prev, reply: turn.better });
         if (learned) {
           const score = Math.round((learned.score || 0) * 100);
           lab.scores.push(score);
           const last = [...lab.transcript].reverse().find((t) => t.who === 'baby');
           if (last) Object.assign(last, { closeness: score, better: turn.better });
+        }
+        const now = stageOf(baby.stats().phrases);
+        if (now.level > before) {
+          say('note', `🎉 The baby grew up: it's a ${now.name} now. Lyra will teach longer answers (${now.length}).`);
+          activity('core', { message: `Core lab: the baby mind grew up to the ${now.name} stage` });
         }
       }
       if (!lab.running || lab.stopping) break;
@@ -165,6 +194,7 @@ export function labSnapshot() {
     voice: lab.voice, voices: lab.voices, waiting: lab.waiting, babyVoice: Boolean(process.env.BABY_FISH_VOICE_ID),
     requestsLastMinute: nvidiaCallsNow(), budget: BUDGET_PER_MIN, lastTurn: lab.lastTurn || null,
     transcript: lab.transcript.slice(-60), scores: lab.scores.slice(-120),
-    mind: { exchanges: s.exchanges, phrases: s.phrases, averageCloseness: s.averageCloseness, skills: s.skills.slice(0, 8), beliefs: s.beliefs.slice(0, 12), topPhrases: s.topPhrases.slice(0, 10), patterns: s.patterns || [], patternCount: s.patternCount || 0 },
+    mind: { exchanges: s.exchanges, phrases: s.phrases, averageCloseness: s.averageCloseness, skills: s.skills.slice(0, 8), beliefs: s.beliefs.slice(0, 12), topPhrases: s.topPhrases.slice(0, 10), patterns: s.patterns || [], patternCount: s.patternCount || 0,
+      stage: (({ name, level, of, next, length }) => ({ name, level, of, next, length }))(stageOf(s.phrases)) },
   };
 }

@@ -82,6 +82,7 @@
   <div class="side">
     <section class="card">
       <h2>The baby mind</h2>
+      <div id="stage" style="margin:-4px 0 10px;font-size:14px"></div>
       <div class="stats">
         <div class="stat"><b id="sEx">0</b><span>lessons learned</span></div>
         <div class="stat"><b id="sPh">0</b><span>phrases it knows</span></div>
@@ -155,6 +156,12 @@ function render() {
   $('#sReq').textContent = `${d.requestsLastMinute}`;
   $('#sReq').style.color = d.requestsLastMinute >= d.budget ? 'var(--warn)' : '';
   chart(d.scores);
+  if (m.stage) {
+    const st = m.stage, pct = st.next ? Math.min(100, Math.round((m.phrases / st.next.at) * 100)) : 100;
+    $('#stage').innerHTML = `<b style="color:var(--baby);text-transform:capitalize">${esc(st.name)}</b> <span style="color:var(--muted)">· stage ${st.level} of ${st.of} · answers ${esc(st.length)}</span>` +
+      `<div style="height:6px;border-radius:3px;background:var(--bg);margin-top:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--baby)"></div></div>` +
+      `<div class="hint" style="margin-top:4px">${st.next ? `${m.phrases} of ${st.next.at} phrases to grow into a ${esc(st.next.name)}` : 'Fully grown (for now)'}</div>`;
+  }
   $('#pCount').textContent = m.patternCount ? `(${m.patternCount})` : '';
   const gap = (s) => esc(s).replace(/___/g, '<b style="color:var(--baby)">___</b>');
   $('#patterns').innerHTML = m.patterns.length ? m.patterns.map((p) => `<li>“${gap(p.ask)}” → “${gap(p.answer)}” <span class="n">×${p.n}</span></li>`).join('') : '<li class="empty">None yet.</li>';

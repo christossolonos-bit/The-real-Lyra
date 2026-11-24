@@ -541,6 +541,7 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     try {
       const learned = core.observe({ speaker, text, reply, tools: calls.map((c) => c.name) });
       if (learned) activity('core', { intent: learned.intent, closeness: Math.round(learned.score * 100), reward: learned.reward, speaker: speaker.name });
+      if (learned && voice) coreEcho(conversation, learned, calls.length > 0);
     } catch (err) {
       activity('error', { where: 'core', message: err.message });
     }
@@ -602,6 +603,30 @@ function similarity(a, b) {
 
 // Someone telling her she got it wrong (continuity.js keeps it as a caution for a day).
 const CORRECTED = /\b(that'?s (not right|wrong|not true|not how)|you('re| are) wrong|you got (it|that) wrong|no,? (that'?s|it'?s) not|incorrect|wrong again|that'?s false|you'?re making (it|that|stuff) up|not what i (said|asked))\b/i;
+
+// The Core's echo (2026-11-25): in a Discord voice call, when the Core's secret draft came close to what Lyra just
+// said, the Core says its own version right after her, in its own voice (BABY_FISH_VOICE_ID), so he can hear it
+// learning. Lyra still answers first and stays in charge; tool turns and near-misses stay silent; one a minute at most.
+const ECHO_MIN = Number(process.env.CORE_ECHO_MIN || 0.7);
+const ECHO_GAP_MS = 60_000;
+let lastEcho = 0;
+async function coreEcho(conversation, learned, usedTools) {
+  if (usedTools || !learned.draft || (learned.score || 0) < ECHO_MIN || Date.now() - lastEcho < ECHO_GAP_MS) return;
+  if ((learned.score || 0) >= 0.95) return; // a word-for-word copy of what she just said: nothing new to hear
+  if (!String(conversation).startsWith('voice:')) return; // Discord calls only (the hologram has its own voice)
+  const voiceId = process.env.BABY_FISH_VOICE_ID;
+  if (!voiceId) return;
+  try {
+    const { sessions } = await import('./voice/session.js');
+    const session = sessions.get(conversation.slice('voice:'.length)) || [...sessions.values()].find((s) => s.conversation === conversation);
+    if (!session || session.destroyed) return;
+    lastEcho = Date.now();
+    activity('core', { message: `Core echo (${Math.round(learned.score * 100)}% close): ${learned.draft.slice(0, 160)}`, echo: true });
+    session.speakAs(learned.draft, { voiceId });
+  } catch (err) {
+    activity('error', { where: 'core echo', message: err.message });
+  }
+}
 
 // ---- tool gating (Amy's spec: Downloads/amy-tool-gating-spec.md) ----
 

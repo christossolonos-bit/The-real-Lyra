@@ -49,7 +49,8 @@ export function jaccard(a, b) {
   return n / (A.size + b.length - n || 1);
 }
 
-export const sentences = (s) => (stripTags(s).match(/[^.!?…]+[.!?…]*["')\]]*/g) ?? []).map((x) => x.trim()).filter((x) => x.length > 1);
+// a dot between digits ("6.2 hours", "€14.50") isn't the end of a sentence (2026-11-25: "6.2" was learned as "6. 2")
+export const sentences = (s) => (stripTags(s).match(/(?:\d\.\d|[^.!?…])+[.!?…]*["')\]]*/g) ?? []).map((x) => x.trim()).filter((x) => x.length > 1);
 
 // what job a sentence does in a reply
 export function role(s) {
