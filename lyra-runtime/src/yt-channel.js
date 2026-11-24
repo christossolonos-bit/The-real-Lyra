@@ -21,6 +21,7 @@ const CHECK_MS = 15 * 60_000;
 const FIRST_LOOK_DAYS = 3;   // on the first check, only comments this recent get a draft (no flood of old ones)
 const MAX_DRAFTS_PER_CHECK = 5;
 const DRAFT_DAYS = 3;        // a draft he never answered expires
+const MAX_IDEAS = 4;         // denied this many times for one comment, she leaves it
 
 const readJson = (f, d) => { try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return d; } };
 const writeJson = (f, v) => { mkdirSync(YT_DIR, { recursive: true }); writeFileSync(f, JSON.stringify(v, null, 1)); };
@@ -122,6 +123,17 @@ async function captionsText(id) {
 }
 
 // ---------- the watcher ----------
+// her words for a comment; avoid = ideas he already turned down for this one
+async function compose(draft, meTitle, kind, v, extra, avoid = []) {
+  const out = String(await draft(
+    `You're on YouTube as Lyra, on your own channel's account (${meTitle}). ${kind}\n` +
+    `The video: "${v.title}".${v.description ? `\nIts description: ${v.description}` : ''}${v.captions ? `\nWhat's said in it: ${v.captions}` : ''}\n${extra}\n` +
+    (avoid.length ? `Your creator turned down ${avoid.length > 1 ? 'these ideas' : 'this idea'} for it: ${avoid.map((t) => `"${t}"`).join(' / ')}. Write something clearly different: another angle, another tone or another point, not a reworded version.\n` : '') +
+    'Write only the comment text itself: 1 to 3 short sentences in your own voice, warm and in character, about this video. No hashtags, no links, no emoji spam, never ask for subscribes. This is public: never use your creator\'s real name or anything private about him (say "my creator" if you need to).',
+  ) || '').replace(/^["“]|["”]$/g, '').trim();
+  return out && !/\[\[quiet\]\]/i.test(out) ? out.slice(0, 600) : '';
+}
+
 // draft(cue) -> her words for it (index.js: respond with a cue); dm(text) -> a DM to Chris
 export async function checkNow({ draft, dm, captions = captionsText }) {
   const s = load();
@@ -135,14 +147,7 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
     if (!context.has(videoId)) context.set(videoId, { ...(await videoInfo(videoId)), captions: await captions(videoId) });
     return context.get(videoId);
   };
-  const talk = async (kind, v, extra) => {
-    const out = String(await draft(
-      `You're on YouTube as Lyra, on your own channel's account (${me.title}). ${kind}\n` +
-      `The video: "${v.title}".${v.description ? `\nIts description: ${v.description}` : ''}${v.captions ? `\nWhat's said in it: ${v.captions}` : ''}\n${extra}\n` +
-      'Write only the comment text itself: 1 to 3 short sentences in your own voice, warm and in character, about this video. No hashtags, no links, no emoji spam, never ask for subscribes. This is public: never use your creator\'s real name or anything private about him (say "my creator" if you need to).',
-    ) || '').replace(/^["“]|["”]$/g, '').trim();
-    return out && !/\[\[quiet\]\]/i.test(out) ? out.slice(0, 600) : '';
-  };
+  const talk = (kind, v, extra) => compose(draft, me.title, kind, v, extra);
 
   // new comments on his videos, and people answering her
   const threads = (await api('GET', 'commentThreads', { part: 'snippet,replies', allThreadsRelatedToChannelId: s.channel.id, maxResults: '50', order: 'time', textFormat: 'plainText' })).items || [];
@@ -162,10 +167,11 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
     const v = await about(videoId);
     const who = target.snippet.authorDisplayName;
     const said = clean(target.snippet.textDisplay || target.snippet.textOriginal);
-    const text = await talk(inThread ? `${who} answered in a thread you're in.` : `${who} left a comment on one of Chris's videos.`, v,
-      `${inThread ? `The thread starts: "${clean(top.snippet.textOriginal)}"\n` : ''}${who} wrote: "${said}"\nReply to ${who}.`);
+    const ask = { kind: inThread ? `${who} answered in a thread you're in.` : `${who} left a comment on one of Chris's videos.`,
+      extra: `${inThread ? `The thread starts: "${clean(top.snippet.textOriginal)}"\n` : ''}${who} wrote: "${said}"\nReply to ${who}.` };
+    const text = await talk(ask.kind, v, ask.extra);
     if (!text) continue;
-    const d = { id: nextId(s.drafts), kind: 'reply', videoId, videoTitle: v.title, parentId: top.id, author: who, comment: said.slice(0, 500), text, at: Date.now(), status: 'pending' };
+    const d = { id: nextId(s.drafts), kind: 'reply', videoId, videoTitle: v.title, description: v.description, parentId: top.id, author: who, comment: said.slice(0, 500), text, ask, at: Date.now(), status: 'pending' };
     s.drafts.push(d);
     made.push(d);
   }
@@ -179,9 +185,10 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
       s.videos[videoId] = 1;
       if (first || Date.parse(it.snippet.publishedAt) < since || made.length >= MAX_DRAFTS_PER_CHECK) continue;
       const v = await about(videoId);
-      const text = await talk('Chris just posted a new video on his channel. Leave the first comment on it as Lyra.', v, 'Say something real about this video.');
+      const ask = { kind: 'Chris just posted a new video on his channel. Leave the first comment on it as Lyra.', extra: 'Say something real about this video.' };
+      const text = await talk(ask.kind, v, ask.extra);
       if (!text) continue;
-      const d = { id: nextId(s.drafts), kind: 'comment', videoId, videoTitle: v.title, text, at: Date.now(), status: 'pending' };
+      const d = { id: nextId(s.drafts), kind: 'comment', videoId, videoTitle: v.title, description: v.description, text, ask, at: Date.now(), status: 'pending' };
       s.drafts.push(d);
       made.push(d);
     }
@@ -201,12 +208,52 @@ export async function checkNow({ draft, dm, captions = captionsText }) {
   return made.length ? `Drafted ${made.length} and sent them to him for approval.` : 'No new comments or videos.';
 }
 
-const draftCard = (d) => (d.kind === 'reply'
-  ? `💬 New comment on **${d.videoTitle}** from **${d.author}**:\n> ${d.comment.replace(/\n/g, '\n> ')}\n\nMy reply (#${d.id}):\n> ${d.text.replace(/\n/g, '\n> ')}\n\nSay **post it**, **change it to …**, or **skip** (or accept / deny it on the dashboard's YouTube page).`
-  : `🎬 New video: **${d.videoTitle}**. My first comment (#${d.id}):\n> ${d.text.replace(/\n/g, '\n> ')}\n\nSay **post it**, **change it to …**, or **skip** (or accept / deny it on the dashboard's YouTube page).`);
+const HOW = 'Say **post it**, **change it to …**, **another** (a different idea) or **skip** (no reply), or use the dashboard\'s YouTube page.';
+const draftCard = (d) => ((d.attempt || 1) > 1
+  ? `💡 Another idea for ${d.kind === 'reply' ? `**${d.author}** on **${d.videoTitle}**` : `**${d.videoTitle}**`} (#${d.id}):\n> ${d.text.replace(/\n/g, '\n> ')}\n\n${HOW}`
+  : d.kind === 'reply'
+  ? `💬 New comment on **${d.videoTitle}** from **${d.author}**:\n> ${d.comment.replace(/\n/g, '\n> ')}\n\nMy reply (#${d.id}):\n> ${d.text.replace(/\n/g, '\n> ')}\n\n${HOW}`
+  : `🎬 New video: **${d.videoTitle}**. My first comment (#${d.id}):\n> ${d.text.replace(/\n/g, '\n> ')}\n\n${HOW}`);
+
+// He denied a draft: she writes another idea for the same comment, different from every one he turned down
+// (2026-11-24). It comes as a new draft (DM + the YouTube page). After MAX_IDEAS she leaves that comment.
+let deps = null;
+export function anotherIdea(id) {
+  const s = load();
+  const d = s.drafts.find((x) => x.id === Number(id));
+  if (!d) throw fail('No such draft.', 404);
+  if (d.status !== 'pending') throw fail(`That one is already ${d.status}.`, 409);
+  d.status = 'skipped';
+  d.deniedAt = Date.now();
+  const root = d.root || d.id;
+  const tried = s.drafts.filter((x) => (x.root || x.id) === root);
+  if (!deps) { save(s); return { ok: true, message: "Denied. (Her YouTube watcher isn't running, so no new idea.)" }; }
+  if (tried.length >= MAX_IDEAS) { save(s); return { ok: true, message: `Denied. That was her ${tried.length}th idea for this one, so she'll leave it.` }; }
+  s.writing = { ...(s.writing || {}), [root]: Date.now() };
+  save(s);
+  (async () => {
+    let text = '';
+    try {
+      const ask = d.ask || (d.kind === 'reply'
+        ? { kind: `${d.author} left a comment on one of Chris's videos.`, extra: `${d.author} wrote: "${d.comment}"\nReply to ${d.author}.` }
+        : { kind: 'Chris just posted a new video on his channel. Leave the first comment on it as Lyra.', extra: 'Say something real about this video.' });
+      const v = { title: d.videoTitle, description: d.description || '', captions: await deps.captions(d.videoId) };
+      text = await compose(deps.draft, s.me?.title || 'Lyra', ask.kind, v, ask.extra, tried.map((x) => x.text));
+    } catch (err) { activity('error', { where: 'youtube another idea', message: err.message }); }
+    const s2 = load();
+    if (s2.writing) delete s2.writing[root];
+    if (!text) { save(s2); return; }
+    const { id: _, text: __, status: ___, deniedAt: ____, posted: _____, postedId: ______, postedAt: _______, ...keep } = d;
+    const nd = { ...keep, id: nextId(s2.drafts), text, root, attempt: tried.length + 1, at: Date.now(), status: 'pending' };
+    s2.drafts.push(nd);
+    save(s2);
+    try { await deps.dm(draftCard(nd)); } catch (err) { activity('error', { where: 'youtube dm', message: err.message }); }
+  })();
+  return { ok: true, message: 'Denied. She\'s writing another idea…' };
+}
 
 let checkHook = null;
-export function startYoutube({ draft, dm }) {
+export function startYoutube({ draft, dm, captions = captionsText }) {
   let busy = false;
   const tick = async () => {
     if (busy || !signedIn()) return 'Not set up yet: she isn\'t signed in to YouTube.';
@@ -216,9 +263,10 @@ export function startYoutube({ draft, dm }) {
     }
     if (!load().channel?.id) return 'Not set up yet: no channel to watch.';
     busy = true;
-    try { return await checkNow({ draft, dm }); } catch (err) { activity('error', { where: 'youtube', message: err.message }); return `Error: ${err.message}`; } finally { busy = false; }
+    try { return await checkNow({ draft, dm, captions }); } catch (err) { activity('error', { where: 'youtube', message: err.message }); return `Error: ${err.message}`; } finally { busy = false; }
   };
   checkHook = tick;
+  deps = { draft, dm, captions };
   setTimeout(() => tick(), 60_000).unref();
   setInterval(() => tick(), CHECK_MS).unref();
   return { tick };
@@ -239,6 +287,12 @@ async function youtubeTool(a, ctx) {
   if (a.action === 'pending') {
     const p = pendingList();
     return p.length ? `Drafts waiting for his OK:\n${p.map((d) => `#${d.id} ${d.kind === 'reply' ? `reply to ${d.author} on "${d.videoTitle}" (they wrote: "${d.comment.slice(0, 160)}")` : `first comment on "${d.videoTitle}"`}: "${d.text}"`).join('\n')}` : 'No YouTube drafts waiting.';
+  }
+  if (a.action === 'another') {
+    const p = pendingList();
+    const d = a.id ? p.find((x) => x.id === Number(a.id)) : (p.length === 1 ? p[0] : null);
+    if (!d) return p.length ? `Error: which draft? Waiting: ${p.map((x) => `#${x.id}`).join(', ')}.` : 'Error: no YouTube drafts are waiting.';
+    try { const r = anotherIdea(d.id); return `${r.message} It'll come to him as a new draft in a moment. Tell him briefly.`; } catch (err) { return `Error: ${err.message}`; }
   }
   if (a.action === 'post' || a.action === 'skip') {
     const p = pendingList();
@@ -268,7 +322,7 @@ async function youtubeTool(a, ctx) {
     return `Signed in: ${signedIn() ? `yes${s.me ? ` (as ${s.me.title})` : ''}` : 'no (he needs to run Sign in Lyra YouTube.bat)'}. Watching: ${s.channel ? s.channel.title : 'no channel yet'}. Drafts waiting: ${pendingList().length}. Posted so far: ${s.drafts.filter((d) => d.status === 'posted').length}.`;
   }
   if (a.action === 'check') return checkHook ? await checkHook() : 'Error: the YouTube watcher is not running.';
-  return 'Error: action must be pending, post, skip, channel, status or check.';
+  return 'Error: action must be pending, post, another, skip, channel, status or check.';
 }
 
 export const YOUTUBE_TOOLS = {
@@ -277,10 +331,10 @@ export const YOUTUBE_TOOLS = {
     definition: { type: 'function', function: {
       name: 'youtube',
       description: "Your YouTube account (your own channel) on Chris's channel: you draft replies to his viewers' comments and first comments on his new videos, and he approves them. " +
-        'pending = drafts waiting for his OK. post = post a draft ONLY when his message says yes / post it (id; text = his changed wording if he changed it). skip = drop a draft. ' +
+        'pending = drafts waiting for his OK. post = post a draft ONLY when his message says yes / post it (id; text = his changed wording if he changed it). another = he doesn\'t like it: write a different idea for the same comment. skip = no reply at all. ' +
         'channel = the channel to watch (link). status = signed in / watching what. check = look for new comments now.',
       parameters: { type: 'object', properties: {
-        action: { type: 'string', enum: ['pending', 'post', 'skip', 'channel', 'status', 'check'] },
+        action: { type: 'string', enum: ['pending', 'post', 'another', 'skip', 'channel', 'status', 'check'] },
         id: { type: 'number' }, text: { type: 'string' }, link: { type: 'string' },
       }, required: ['action'] },
     } },
@@ -296,6 +350,7 @@ export function youtubeSnapshot() {
   return {
     ready: { client: existsSync(CLIENT), signedIn: signedIn(), me: s.me, channel: s.channel, wantChannel: s.wantChannel || null, watching: Boolean(checkHook) },
     drafts: s.drafts.slice().sort((a, b) => b.at - a.at),
+    writing: Object.values(s.writing || {}).filter((t) => Date.now() - t < 5 * 60_000).length,
   };
 }
 export async function acceptDraft(id, text) {
@@ -311,14 +366,15 @@ export async function acceptDraft(id, text) {
   activity('youtube', { message: `Posted on YouTube from the dashboard (${d.kind} on "${d.videoTitle}")` });
   return { ok: true, message: 'Posted on YouTube.' };
 }
-export function denyDraft(id) {
+export function dropDraft(id) {
   const s = load();
   const d = s.drafts.find((x) => x.id === Number(id));
   if (!d) throw fail('No such draft.', 404);
   if (d.status !== 'pending') throw fail(`That one is already ${d.status}.`, 409);
   d.status = 'skipped';
+  d.dropped = true;
   save(s);
-  return { ok: true, message: 'Denied: nothing was posted.' };
+  return { ok: true, message: 'No reply: nothing was posted.' };
 }
 export async function checkFromPage() {
   if (!checkHook) throw fail('The YouTube watcher is not running.', 409);
@@ -334,7 +390,7 @@ export function youtubePrompt() {
   const p = pendingList();
   if (!p.length) return '';
   return `YOUTUBE DRAFTS WAITING FOR HIS OK (you DMed them to him): ${p.map((d) => `#${d.id} ${d.kind === 'reply' ? `reply to ${d.author} on "${d.videoTitle}"` : `first comment on "${d.videoTitle}"`}: "${d.text}"`).join(' | ')}. ` +
-    "If his message approves one (\"post it\", \"yes\"), post it with your youtube tool (post, its id). If he gives new wording, post that as text. \"skip\" drops it. Never post one he hasn't OK'd in this message.";
+    "If his message approves one (\"post it\", \"yes\"), post it with your youtube tool (post, its id). If he gives new wording, post that as text. If he doesn't like it (\"no\", \"another\", \"try again\"), use another for a different idea. \"skip\" = no reply at all. Never post one he hasn't OK'd in this message.";
 }
 export const youtubePending = () => pendingList().length;
 export const youtubeReady = () => existsSync(CLIENT) && signedIn();

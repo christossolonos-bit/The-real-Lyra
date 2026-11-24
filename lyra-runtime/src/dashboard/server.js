@@ -579,7 +579,9 @@ function buildRoutes(bot) {
     // The YouTube page (/youtube.html): her drafted comments on his channel, accepted or denied by him (2026-11-24)
     r('GET', '/api/youtube', async () => (await import('../yt-channel.js')).youtubeSnapshot()),
     r('POST', '/api/youtube/(?<id>\\d+)/accept', async ({ params, body }) => (await import('../yt-channel.js')).acceptDraft(params.id, body.text)),
-    r('POST', '/api/youtube/(?<id>\\d+)/deny', async ({ params }) => (await import('../yt-channel.js')).denyDraft(params.id)),
+    // deny = she writes another idea; drop = no reply at all
+    r('POST', '/api/youtube/(?<id>\\d+)/deny', async ({ params }) => (await import('../yt-channel.js')).anotherIdea(params.id)),
+    r('POST', '/api/youtube/(?<id>\\d+)/drop', async ({ params }) => (await import('../yt-channel.js')).dropDraft(params.id)),
     r('POST', '/api/youtube/check', async () => (await import('../yt-channel.js')).checkFromPage()),
     r('POST', '/api/youtube/channel', async ({ body }) => (await import('../yt-channel.js')).channelFromPage(body.link)),
     r('GET', '/api/pressure', () => pressure.snapshot()),

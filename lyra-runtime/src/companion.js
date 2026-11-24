@@ -129,7 +129,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- reminder when he asks to be reminded of something at a time ("remind me at 9", "don't let me forget…tonight"), or gives a time for something he wants to do or buy ("for tonight at 9"); also to list or cancel reminders.\n` +
         `- shopping for his shopping list: adding or ticking off items, what's on it, or when he says he's at / going to the supermarket (send it). If he gives a time with it, also reminder.\n` +
         `- diary when he asks you to write something in his diary, or asks what he did / how he felt on a day or this week, or for a recap of his week.\n` +
-        `- youtube for your YouTube account on his channel: his answer to a reply or comment you drafted ("post it", "change it to…", "skip"), his channel link to watch, or what's waiting.\n` +
+        `- youtube for your YouTube account on his channel: his answer to a reply or comment you drafted ("post it", "change it to…", "another" for a different idea, "skip"), his channel link to watch, or what's waiting.\n` +
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
@@ -175,7 +175,7 @@ export async function planTurn(history, speaker, text, tools) {
   // her YouTube drafts waiting for his OK (yt-channel.js)
   try {
     const yt = await import('./yt-channel.js');
-    if ((yt.youtubePending() && /\b(post|yes|yeah|yep|skip|change|reply|comment|go ahead|send it|do it|ok(ay)?|looks good|#\d+)\b/.test(low)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
+    if ((yt.youtubePending() && /\b(post|yes|yeah|yep|skip|change|reply|comment|go ahead|send it|do it|ok(ay)?|looks good|another|try again|different|#\d+)\b/.test(low)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
   } catch {}
   // his diary and his family's birthdays (diary.js, birthdays.js)
   if (/\b(diary|dear diary|what did i (do|get up to)|how was my week|recap (of )?my week|my week (so far|recap))\b/.test(low)) ensure('diary');
@@ -495,7 +495,9 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
       reply = stripTags(await chat([
         ...messages,
         { role: 'assistant', content: reply },
-        { role: 'user', content: `(That's nearly word for word what you already said. Drop it entirely and answer what ${speaker.name} actually just said: "${text.slice(0, 300)}". Reply to them fresh; they haven't seen the repeat.)` },
+        // a cue turn has no text of his (2026-11-24: YouTube drafts crashed here when one came out like the last)
+        { role: 'user', content: text ? `(That's nearly word for word what you already said. Drop it entirely and answer what ${speaker.name} actually just said: "${String(text).slice(0, 300)}". Reply to them fresh; they haven't seen the repeat.)`
+          : `(That's nearly word for word what you already said. Drop it and write something new for this: "${String(cue || '').slice(0, 600)}")` },
       ], { ...chatOpts, onSentence: undefined }));
     }
   }

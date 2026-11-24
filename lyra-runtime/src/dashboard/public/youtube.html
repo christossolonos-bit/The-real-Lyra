@@ -50,6 +50,9 @@
   .state { font-size:12px; font-weight:600; }
   .state.posted { color:var(--good); } .state.skipped, .state.expired { color:var(--muted); }
   .empty { color:var(--muted); }
+  .writing { display:flex; gap:10px; align-items:center; padding:12px 0; color:var(--her); font-size:14px; border-bottom:1px solid var(--border); }
+  .writing .dot { width:8px; height:8px; border-radius:50%; background:var(--her); animation:pulse 1.2s infinite; flex:none; }
+  @keyframes pulse { 50% { opacity:.25; } }
   .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
   .msg.show { opacity:1; }
   @media (max-width:560px) { .draft .when { margin-left:0; width:100%; } .acts .btn { flex:1; } }
@@ -120,7 +123,11 @@ function render() {
   }
   const list = data.drafts.filter((d) => (filter === 'skipped' ? ['skipped', 'expired'].includes(d.status) : d.status === filter));
   $('#count').textContent = { pending: 'Waiting for you', posted: 'Posted', skipped: 'Denied or expired' }[filter];
-  $('#list').innerHTML = list.length ? list.map(card).join('') : `<p class="empty">${filter === 'pending' ? 'Nothing waiting. New comments on your videos show up here for you to accept or deny.' : 'Nothing here yet.'}</p>`;
+  const writing = filter === 'pending' && data.writing ? `<div class="writing"><span class="dot"></span>Lyra is writing ${data.writing > 1 ? `${data.writing} new ideas` : 'another idea'}…</div>` : '';
+  $('#list').innerHTML = writing + (list.length ? list.map(card).join('') : writing ? '' : `<p class="empty">${filter === 'pending' ? 'Nothing waiting. New comments on your videos show up here for you to accept or deny.' : 'Nothing here yet.'}</p>`);
+  // while she's writing, look again soon
+  clearTimeout(render.soon);
+  if (data.writing) render.soon = setTimeout(() => { if (!document.activeElement || document.activeElement.tagName !== 'TEXTAREA') load().catch(() => {}); }, 4000);
   for (const ta of document.querySelectorAll('textarea')) ta.oninput = () => { edits.set(Number(ta.dataset.id), ta.value); markEdited(ta); };
   for (const ta of document.querySelectorAll('textarea')) markEdited(ta);
 }
@@ -143,15 +150,16 @@ function card(d) {
     return `<div class="draft">${head}
       <div class="label">Lyra ${d.status === 'posted' ? 'posted' : 'wanted to say'}</div>
       <div class="done-text">${esc(d.posted || d.text)}</div>
-      <div class="acts"><span class="state ${d.status}">${{ posted: `Posted ${d.postedAt ? when(d.postedAt) : ''}`, skipped: 'Denied', expired: 'Expired (not answered in 3 days)' }[d.status]}</span></div>
+      <div class="acts"><span class="state ${d.status}">${{ posted: `Posted ${d.postedAt ? when(d.postedAt) : ''}`, skipped: d.dropped ? 'No reply' : 'Denied', expired: 'Expired (not answered in 3 days)' }[d.status]}</span></div>
     </div>`;
   }
   return `<div class="draft" data-id="${d.id}">${head}
-    <div class="label">Lyra's ${d.kind === 'reply' ? 'reply' : 'comment'} (you can edit it)</div>
+    <div class="label">Lyra's ${d.kind === 'reply' ? 'reply' : 'comment'}${(d.attempt || 1) > 1 ? ` · idea ${d.attempt}` : ''} (you can edit it)</div>
     <textarea data-id="${d.id}" maxlength="1500" aria-label="Lyra's comment">${esc(edits.get(d.id) ?? d.text)}</textarea>
     <div class="acts">
       <span class="edited" hidden>Edited: your version will be posted</span>
-      <button class="btn deny" data-act="deny" data-id="${d.id}">✕ Deny</button>
+      <button class="btn" data-act="drop" data-id="${d.id}" title="Don't reply to this comment at all">Don't reply</button>
+      <button class="btn deny" data-act="deny" data-id="${d.id}" title="She writes a different idea for it">✕ Deny, new idea</button>
       <button class="btn accept" data-act="accept" data-id="${d.id}">✓ Accept and post</button>
     </div>
   </div>`;
@@ -167,7 +175,7 @@ $('#list').onclick = async (e) => {
   try {
     const r = b.dataset.act === 'accept'
       ? await api('POST', `/api/youtube/${id}/accept`, { text: row.querySelector('textarea').value })
-      : await api('POST', `/api/youtube/${id}/deny`);
+      : await api('POST', `/api/youtube/${id}/${b.dataset.act === 'drop' ? 'drop' : 'deny'}`);
     edits.delete(id);
     toast(r.message);
     await load();
