@@ -131,6 +131,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- diary when he asks you to write something in his diary, or asks what he did / how he felt on a day or this week, or for a recap of his week.\n` +
         `- youtube for your YouTube account on his channel: his answer to a reply or comment you drafted ("post it", "change it to…", "another" for a different idea, "skip"), his channel link to watch, or what's waiting.\n` +
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
+        `- trusted_senders when he says who can (or can't any more) send you photos, files or links, or asks who can.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
         `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
@@ -177,6 +178,8 @@ export async function planTurn(history, speaker, text, tools) {
     const yt = await import('./yt-channel.js');
     if ((yt.youtubePending() && /\b(post|yes|yeah|yep|skip|change|reply|comment|go ahead|send it|do it|ok(ay)?|looks good|another|try again|different|#\d+)\b/.test(low)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
   } catch {}
+  // who may share photos, files and links with her (trusted.js)
+  if (/\b(trust(ed)?|allow|let|can|may)\b/.test(low) && /\b(send|share|give)\b.{0,40}\b(photos?|pictures?|images?|files?|links?|pdfs?|stuff)\b|\btrusted (list|senders?|people)\b/.test(low)) ensure('trusted_senders');
   // his diary and his family's birthdays (diary.js, birthdays.js)
   if (/\b(diary|dear diary|what did i (do|get up to)|how was my week|recap (of )?my week|my week (so far|recap))\b/.test(low)) ensure('diary');
   if (/\b(birthday|b-?day|anniversary|name ?day|born on)\b/.test(low)) ensure('birthdays');

@@ -4,7 +4,7 @@ import { loadCommands } from './loadCommands.js';
 import { respond, SEARCH_ANNOUNCEMENT } from './companion.js';
 import { sessions } from './voice/session.js';
 import { requestClip, isMp4 } from './avatarVideo.js';
-import { readAttachments, recentDocumentsLine } from './attachments.js';
+import { readAttachments, readSharedLinks, recentDocumentsLine } from './attachments.js';
 import { activity } from './events.js';
 import { sleep } from './sleep.js';
 
@@ -100,10 +100,17 @@ function createClient() {
     // voice messages, photos and files: what he said in a voice note joins the text; what she reads goes to her prompt
     let attached = { said: '', extra: '' };
     const isOwnerMsg = config.ownerIds.includes(message.author.id);
+    // someone on Chris's trusted list (trusted.js): their photos, files and links are read, as information only
+    const trustedMsg = !isOwnerMsg && (await import('./trusted.js')).isTrusted(message.author.id);
     if (message.attachments.size) {
       message.channel.sendTyping().catch(() => {});
-      attached = await readAttachments(message, { owner: isOwnerMsg, conversation: `text:${message.channelId}` });
+      attached = await readAttachments(message, { owner: isOwnerMsg, trusted: trustedMsg, conversation: `text:${message.channelId}` });
       text = [text, attached.said].filter(Boolean).join(' ').trim();
+    }
+    if (trustedMsg && /https?:\/\//i.test(text)) {
+      message.channel.sendTyping().catch(() => {});
+      const pages = await readSharedLinks(text, { from: message.member?.displayName ?? message.author.displayName ?? message.author.username, conversation: `text:${message.channelId}` });
+      if (pages) attached.extra = [attached.extra, pages].filter(Boolean).join('\n\n');
     }
     if (!text) return;
 
