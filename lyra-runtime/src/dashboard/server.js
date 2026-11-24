@@ -571,6 +571,12 @@ function buildRoutes(bot) {
       return { ok: true, message: done.length ? `${done.join(' and ')}.` : "She wasn't singing anything." };
     }),
     r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
+    // The Core lab page (/core-lab.html): Lyra talking with a baby mind that learns from her, live (2026-11-25)
+    r('GET', '/api/core-lab', async () => (await import('../core-lab.js')).labSnapshot()),
+    r('POST', '/api/core-lab/start', async ({ body }) => (await import('../core-lab.js')).labStart(body)),
+    r('POST', '/api/core-lab/stop', async () => (await import('../core-lab.js')).labStop()),
+    r('POST', '/api/core-lab/voices', async ({ body }) => (await import('../core-lab.js')).labVoices(body.on)),
+    r('POST', '/api/core-lab/reset', async () => (await import('../core-lab.js')).labReset()),
     // The Birthdays page (/birthdays.html): a calendar of his family's birthdays and dates (2026-11-23)
     r('GET', '/api/birthdays', async () => ({ people: (await import('../birthdays.js')).birthdaysAll() })),
     r('POST', '/api/birthdays', async ({ body }) => (await import('../birthdays.js')).birthdayPut(null, body)),

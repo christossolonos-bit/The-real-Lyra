@@ -47,6 +47,21 @@ function reminderTool({ action, text = '', when: w = '', id = 0 }, ctx) {
     const due = parseWhen(w);
     if (!due) return 'Error: "when" must be like "in 20 minutes", "in 2 hours", or a Cyprus date-time like 2026-11-21T18:00.';
     if (due < Date.now() - 60_000) return `Error: ${when(due)} has already passed. Check today's date and time in your prompt.`;
+    // he named a clock time ("at 8pm", "at 10:30"): the reminder has to be at that time (2026-11-25: "at 8pm"
+    // was passed as "in 8 hours" and saved for 8:42 am)
+    const said = String(ctx?.userText ?? '').toLowerCase().match(/\bat\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?(?!\s*(?:min|hour|day|euro|€|%))/);
+    if (said) {
+      let h = Number(said[1]);
+      const m = Number(said[2] || 0);
+      const ap = (said[3] || '').replace(/\./g, '');
+      if (ap === 'pm' && h < 12) h += 12;
+      if (ap === 'am' && h === 12) h = 0;
+      const at = new Date(due);
+      const okHour = ap || h > 12 ? at.getHours() === h : at.getHours() % 12 === h % 12;
+      if (h < 24 && m < 60 && (!okHour || at.getMinutes() !== m)) {
+        return `Error: he said "${said[0].trim()}", but this would be ${when(due)}. Pass that exact clock time as a Cyprus date-time (like ${new Date(Math.max(Date.now(), due)).toLocaleDateString('en-CA')}T${String(ap || h > 12 ? h : (h < 12 && new Date().getHours() >= h ? h + 12 : h)).padStart(2, '0')}:${String(m).padStart(2, '0')}), not "in N hours".`;
+      }
+    }
     const r = { id: nextId(d.reminders), text: text.trim().slice(0, 300), due, created: Date.now(), by: ctx?.speaker?.name || 'Chris', times: 0, announcedAt: 0, done: false };
     d.reminders.push(r);
     save(d);

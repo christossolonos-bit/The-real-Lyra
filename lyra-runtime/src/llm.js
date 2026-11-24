@@ -35,7 +35,10 @@ export async function chat(messages, { onSentence, tools = [], runTool, maxRound
   for (let round = 0; ; round++) {
     const offerTools = tools.length > 0 && paid < maxRounds;
     const force = round === 0 && offerTools && mustCall && tools.some((t) => t.function.name === mustCall) ? mustCall : null;
-    const stream = await startChat(messages, offerTools ? tools : null, voice, force);
+    // real tools in hand (a reminder, money, the diary…), not only her note-keeping: the big model gets longer to
+    // answer before a fallback writes it (2026-11-25: the fallback set "at 8pm" as "in 8 hours")
+    const important = offerTools && tools.some((t) => !free.includes(t.function.name) && !LIGHT_TOOLS.has(t.function.name));
+    const stream = await startChat(messages, offerTools ? tools : null, voice, force, important);
 
     let content = '';
     let pending = '';
@@ -104,9 +107,12 @@ export async function chat(messages, { onSentence, tools = [], runTool, maxRound
   }
 }
 
-async function startChat(messages, tools, voice = false, force = null) {
+// tools that are always in hand and harmless if a fallback uses them
+const LIGHT_TOOLS = new Set(['guide', 'request_tool', 'thread', 'threads', 'note', 'scratchpad']);
+
+async function startChat(messages, tools, voice = false, force = null, important = false) {
   if (config.brain === 'openrouter') return openRouterChat(messages, tools, voice, force);
-  if (config.brain === 'nvidia') return nvidiaChat(messages, tools, force);
+  if (config.brain === 'nvidia') return nvidiaChat(messages, tools, force, important);
   const request = {
     model: config.ollama.model,
     messages,
@@ -171,26 +177,80 @@ async function* streamOpenAIChat(res, label) {
 }
 
 // NVIDIA NIM chat — Nemotron burns the token budget on reasoning unless enable_thinking is false.
-async function* nvidiaChat(messages, tools, force = null) {
+// The big model writes her replies; if it hasn't started answering within firstWordMs (or fails), a fallback model
+// writes this one instead (2026-11-25: the free API kept the big model 20-40 s per reply). lastChatModel says which.
+// Every NVIDIA request is counted, so background jobs (the Core lab) can stay well inside the free limit of about
+// 40 a minute and leave room for her replies (2026-11-25)
+const nvidiaCalls = [];
+function noteNvidiaCall() { const t = Date.now(); nvidiaCalls.push(t); while (nvidiaCalls.length && t - nvidiaCalls[0] > 60_000) nvidiaCalls.shift(); }
+export const nvidiaCallsLastMinute = () => nvidiaCalls.filter((t) => Date.now() - t < 60_000).length;
+export const bigModelSlow = () => Date.now() < bigSlowUntil;
+export let lastChatModel = '';
+// once the big model was too slow, it's skipped for slowPauseMs (no 8 s wait on every round), then tried again
+let bigSlowUntil = 0;
+async function* nvidiaChat(messages, tools, force = null, important = false) {
   if (!config.nvidia.apiKey) throw new Error('NVIDIA is the teacher, but NVIDIA_API_KEY is empty in .env');
+  const models = [config.nvidia.model, ...(config.nvidia.fallbackModels || [])].filter((m, i, a) => m && a.indexOf(m) === i);
+  // with real tools in hand, the big model is always tried and gets toolWaitMs; plain chat skips it while it's slow
+  const wait = important ? (config.nvidia.toolWaitMs || 25_000) : (config.nvidia.firstWordMs || 8000);
+  for (let i = !important && Date.now() < bigSlowUntil && models.length > 1 ? 1 : 0; i < models.length; i++) {
+    const last = i === models.length - 1;
+    const ac = new AbortController();
+    const timer = last ? null : setTimeout(() => ac.abort(), wait);
+    let first;
+    let it;
+    try {
+      const res = await nvidiaRequest(models[i], messages, tools, force, ac.signal);
+      it = streamOpenAIChat(res, 'NVIDIA')[Symbol.asyncIterator]();
+      first = await it.next(); // the first words (or a tool call): the model is answering
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      if (last) throw err;
+      const why = ac.signal.aborted ? `no answer in ${Math.round(wait / 1000)} s` : err.message.slice(0, 120);
+      if (i === 0) bigSlowUntil = Date.now() + (config.nvidia.slowPauseMs || 600_000);
+      try { (await import('./events.js')).activity('brain', { message: `${models[i]}: ${why}; ${models[i + 1]} answers instead${i === 0 ? ` (and for the next ${Math.round((config.nvidia.slowPauseMs || 600_000) / 60_000)} min)` : ''}` }); } catch {}
+      continue;
+    }
+    if (timer) clearTimeout(timer);
+    if (i === 0) bigSlowUntil = 0;
+    lastChatModel = models[i];
+    if (!first.done) yield first.value;
+    for (let r = await it.next(); !r.done; r = await it.next()) yield r.value;
+    return;
+  }
+}
+// a fallback model is smaller and makes things up more easily (2026-11-25: an invented "chicken and dumplings"
+// evening went into his diary): stricter rules, and calmer sampling
+const FALLBACK_RULES = 'Strict rules for this reply: only say things that are in this conversation, your memories above or a tool result. ' +
+  'Never invent past events, plans, people or things he said; if you don\'t know, ask. Only use a tool when his latest message clearly asks for it. ' +
+  'For a reminder at a clock time he named, pass that exact time as a date-time (like 2026-11-25T20:00), never "in N hours".';
+async function nvidiaRequest(model, messages, tools, force, signal) {
+  const fallback = model !== config.nvidia.model;
+  let msgs = messages.map(toOpenAI);
+  if (fallback) {
+    const at = msgs.findIndex((m) => m.role !== 'system');
+    msgs = [...msgs.slice(0, at < 0 ? msgs.length : at), { role: 'system', content: FALLBACK_RULES }, ...msgs.slice(at < 0 ? msgs.length : at)];
+  }
   const body = {
-    model: config.nvidia.model,
+    model,
     stream: true,
     max_tokens: config.nvidia.maxTokens,
-    temperature: 0.6,
+    temperature: fallback ? 0.3 : 0.6,
     top_p: 0.95,
-    messages: messages.map(toOpenAI),
+    messages: msgs,
     chat_template_kwargs: { enable_thinking: false },
   };
   if (tools) body.tools = tools;
   if (tools && force) body.tool_choice = { type: 'function', function: { name: force } };
+  noteNvidiaCall();
   const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: nvidiaHeaders(),
     body: JSON.stringify(body),
+    signal,
   });
-  if (!res.ok) throw new Error(`NVIDIA (${config.nvidia.model}) failed (${res.status}): ${(await res.text()).slice(0, 300)}`);
-  yield* streamOpenAIChat(res, 'NVIDIA');
+  if (!res.ok) throw new Error(`NVIDIA (${model}) failed (${res.status}): ${(await res.text()).slice(0, 300)}`);
+  return res;
 }
 
 // Yields the same shape as Ollama's stream ({ message: { content, tool_calls } }) so chat()
@@ -338,24 +398,39 @@ export async function agentStep(messages, tools, model) {
 }
 
 // A fast JSON answer from whichever brain is on (no reasoning), for planning each reply / theater moments.
-export async function quickJson(messages, { timeoutMs = 45_000, maxTokens } = {}) {
+// fast: the planning step, on the small models (config.nvidia.planModels) in order, planMs each; anything else
+// (memory, journal, dreams, theater) stays on the big model.
+export async function quickJson(messages, { timeoutMs = 45_000, maxTokens, fast = false } = {}) {
   if (config.brain === 'ollama') return json(messages);
-  if (config.brain === 'nvidia') {
+  if (config.brain === 'nvidia' && fast && config.nvidia.planModels?.length) {
+    let lastErr;
+    for (const model of config.nvidia.planModels) {
+      try { return await nvidiaJson(messages, model, { timeoutMs: config.nvidia.planMs || 5000, maxTokens: 512 }); }
+      catch (err) { lastErr = err; }
+    }
+    throw lastErr;
+  }
+  if (config.brain === 'nvidia') return nvidiaJson(messages, config.nvidia.model, { timeoutMs, maxTokens });
+  return openRouterJson(messages, { timeoutMs });
+}
+export async function nvidiaJson(messages, model, { timeoutMs, maxTokens, temperature = 0 }) {
+  {
     if (!config.nvidia.apiKey) throw new Error('NVIDIA is the teacher, but NVIDIA_API_KEY is empty in .env');
+    noteNvidiaCall();
     const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: nvidiaHeaders(),
       body: JSON.stringify({
-        model: config.nvidia.model,
+        model,
         messages: messages.map(toOpenAI),
-        temperature: 0,
+        temperature,
         max_tokens: Math.max(512, maxTokens ?? config.nvidia.maxTokens ?? 512),
         chat_template_kwargs: { enable_thinking: false },
         response_format: { type: 'json_object' },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) throw new Error(`NVIDIA planning failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw new Error(`NVIDIA planning failed (${model}, ${res.status}): ${(await res.text()).slice(0, 200)}`);
     const text = (await res.json()).choices?.[0]?.message?.content ?? '';
     try {
       return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
@@ -363,6 +438,8 @@ export async function quickJson(messages, { timeoutMs = 45_000, maxTokens } = {}
       return null;
     }
   }
+}
+async function openRouterJson(messages, { timeoutMs }) {
   if (!config.openrouter.apiKey) throw new Error('OpenRouter is the brain, but OPENROUTER_API_KEY is empty in .env');
   const res = await fetch(`${OPENROUTER}/chat/completions`, {
     method: 'POST',
@@ -404,6 +481,7 @@ export async function embed(texts, { inputType = 'passage' } = {}) {
     return res.embeddings;
   }
   if (!config.nvidia.apiKey) throw new Error('NVIDIA embeddings need NVIDIA_API_KEY in .env');
+  noteNvidiaCall();
   const res = await fetch(`${config.nvidia.baseUrl}/embeddings`, {
     method: 'POST',
     headers: nvidiaHeaders(),

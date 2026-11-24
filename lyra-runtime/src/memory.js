@@ -425,6 +425,22 @@ export function forgetEveryone() {
   return db.prepare('DELETE FROM memories').run().changes;
 }
 
+// New fingerprints for every memory, with the current embedding model (2026-11-25: the old model was retired, and
+// fingerprints from two different models can't be compared). The memories themselves don't change.
+export async function reembedMemories({ batch = 16, onProgress } = {}) {
+  const rows = db.prepare('SELECT id, content FROM memories').all();
+  const set = db.prepare('UPDATE memories SET embedding = ? WHERE id = ?');
+  let done = 0;
+  for (let i = 0; i < rows.length; i += batch) {
+    const part = rows.slice(i, i + batch);
+    const vectors = await embed(part.map((r) => r.content), { inputType: 'passage' });
+    part.forEach((r, j) => set.run(JSON.stringify(vectors[j]), r.id));
+    done += part.length;
+    onProgress?.(done, rows.length);
+  }
+  return done;
+}
+
 export async function addMemoryManually(userId, content) {
   const [v] = await embed([content], { inputType: 'passage' });
   q.addMemory.run(userId, content, JSON.stringify(v), Date.now());

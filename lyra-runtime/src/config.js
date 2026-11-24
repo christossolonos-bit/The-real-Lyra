@@ -52,7 +52,18 @@ export const config = {
     baseUrl: (env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, ''),
     model: env.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
     maxTokens: num(env.NVIDIA_MAX_TOKENS, 256),
-    embedModel: env.NVIDIA_EMBED_MODEL || 'nvidia/nemotron-3-embed-1b',
+    // nemotron-3-embed-1b reached end of life on 2026-11-23 (HTTP 410): her recall found nothing after that
+    embedModel: env.NVIDIA_EMBED_MODEL || 'nvidia/nemotron-3.5-embed-1b',
+    // Small fast models for the planning step (which tools a reply needs), tried in order (2026-11-25: on the
+    // free API the big model took ~20 s to plan; Bolt planned 11/11 test messages right in under a second)
+    planModels: env.NVIDIA_PLAN_MODELS ? list(env.NVIDIA_PLAN_MODELS) : ['nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'google/gemma-3-4b-it'],
+    planMs: num(env.NVIDIA_PLAN_MS, 5000),
+    // Replies: the big model, unless it hasn't started answering in firstWordMs; then these write it instead
+    fallbackModels: env.NVIDIA_FALLBACK_MODELS ? list(env.NVIDIA_FALLBACK_MODELS) : ['nvidia/nemotron-3.5-lightning-30b-a3b'],
+    firstWordMs: num(env.NVIDIA_FIRST_WORD_MS, 8000),
+    slowPauseMs: num(env.NVIDIA_SLOW_PAUSE_MS, 10 * 60_000), // after it was too slow, skip it this long
+    toolWaitMs: num(env.NVIDIA_TOOL_WAIT_MS, 25_000), // with real tools in hand, wait this long for the big model
+
   },
   // Where semantic memory vectors come from: 'nvidia' (default) or 'ollama'.
   embedder: (env.EMBEDDER || 'nvidia').toLowerCase(),
@@ -72,7 +83,8 @@ export const config = {
 
   memory: {
     topK: num(env.MEMORY_TOP_K, 6),
-    minScore: num(env.MEMORY_MIN_SCORE, 0.35),
+    // nemotron-3.5-embed-1b scores lower than the old model: a right match ~0.34, an unrelated one ~0.15 (2026-11-25)
+    minScore: num(env.MEMORY_MIN_SCORE, 0.25),
     dedupeScore: num(env.MEMORY_DEDUPE_SCORE, 0.9),
   },
 

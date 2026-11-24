@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Core Lab</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --warn:#c27c0e; --bad:#c43c3c; --lyra:#0e9fbf; --baby:#d9468f; --lyrabg:#e8f6fa; --babybg:#fbeaf2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --warn:#f0b445; --bad:#ff6b6b; --lyra:#3fe0ff; --baby:#ff7ab8; --lyrabg:#0f2730; --babybg:#2a1622; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header h1 { margin:0; font-size:18px; }
+  header .status { margin-left:auto; font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; }
+  header .status.on { color:var(--good); }
+  .dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+  .status.on .dot { animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity:.25; } }
+  button { font:inherit; cursor:pointer; }
+  .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:7px 14px; font-size:14px; }
+  .btn.go { background:var(--good); border-color:var(--good); color:#fff; }
+  .btn.stop { color:var(--bad); border-color:var(--bad); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  main { max-width:1150px; margin:0 auto; padding:20px 16px 60px; display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px; align-items:start; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .controls input[type=text] { flex:1 1 200px; min-width:0; font:inherit; font-size:14px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:7px 10px; }
+  .toggle { display:flex; gap:6px; align-items:center; font-size:14px; color:var(--muted); cursor:pointer; user-select:none; }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; }
+  .chat { display:flex; flex-direction:column; gap:10px; max-height:62vh; overflow-y:auto; padding-right:4px; }
+  .msg { max-width:82%; border-radius:12px; padding:8px 12px; overflow-wrap:anywhere; }
+  .msg .who { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; margin-bottom:2px; display:flex; gap:8px; align-items:center; }
+  .msg.lyra { align-self:flex-start; background:var(--lyrabg); }
+  .msg.lyra .who { color:var(--lyra); }
+  .msg.baby { align-self:flex-end; background:var(--babybg); }
+  .msg.baby .who { color:var(--baby); justify-content:flex-end; }
+  .msg .meta { font-size:12px; color:var(--muted); margin-top:4px; }
+  .msg .better { font-size:12px; color:var(--muted); margin-top:4px; border-top:1px dashed var(--border); padding-top:4px; }
+  .score { font-size:11px; border-radius:6px; padding:0 6px; border:1px solid currentColor; font-weight:600; }
+  .note { align-self:center; font-size:12px; color:var(--muted); }
+  .empty { color:var(--muted); font-size:14px; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:var(--bg); border-radius:8px; padding:8px 10px; }
+  .stat b { display:block; font-size:22px; line-height:1.2; }
+  .stat span { font-size:12px; color:var(--muted); }
+  svg.chart { width:100%; height:110px; display:block; margin-top:10px; }
+  .list { font-size:13px; display:grid; gap:4px; margin:0; padding:0; list-style:none; }
+  .list li { overflow-wrap:anywhere; }
+  .list .n { color:var(--muted); font-size:12px; }
+  .side { display:grid; gap:16px; }
+  .msgbar { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
+  .msgbar.show { opacity:1; }
+  @media (max-width:860px) { main { grid-template-columns:1fr; } .msg { max-width:92%; } }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <h1>Core lab</h1>
+  <span class="status" id="status"><span class="dot"></span><span id="statusText">…</span></span>
+</header>
+<main>
+  <div style="display:grid;gap:16px;min-width:0">
+    <section class="card">
+      <div class="controls">
+        <input type="text" id="topic" maxlength="80" placeholder="Topic (optional), e.g. feelings, colours, the weather" aria-label="Topic">
+        <label class="toggle" title="Both speak in the Discord voice call. Uses Fish Audio credits."><input type="checkbox" id="voices"> Voices in Discord</label>
+        <button class="btn go" id="start">▶ Start conversation</button>
+        <button class="btn stop" id="stop" hidden>■ Stop</button>
+      </div>
+      <div class="hint" id="hint">Lyra teaches a baby mind to talk. It learns only by copying her sentences, so it starts by imitating and gets closer as it goes. Free NVIDIA requests: the lab never uses more than half the per-minute limit.</div>
+    </section>
+    <section class="card">
+      <h2>Conversation</h2>
+      <div class="chat" id="chat"></div>
+    </section>
+  </div>
+  <div class="side">
+    <section class="card">
+      <h2>The baby mind</h2>
+      <div class="stats">
+        <div class="stat"><b id="sEx">0</b><span>lessons learned</span></div>
+        <div class="stat"><b id="sPh">0</b><span>phrases it knows</span></div>
+        <div class="stat"><b id="sAvg">0%</b><span>closeness, last 10</span></div>
+        <div class="stat"><b id="sReq">0</b><span>NVIDIA requests / min</span></div>
+      </div>
+      <svg class="chart" id="chart" viewBox="0 0 300 110" preserveAspectRatio="none" role="img" aria-label="How close its answers came, over time"></svg>
+      <div class="hint">How close each answer came to what Lyra wanted (0–100).</div>
+    </section>
+    <section class="card">
+      <h2>Patterns it has worked out <span id="pCount" style="text-transform:none;letter-spacing:0"></span></h2>
+      <ul class="list" id="patterns"></ul>
+      <div class="hint">A sentence with a gap: it can fill the gap with a new word it has never been taught there.</div>
+    </section>
+    <section class="card">
+      <h2>Phrases it uses most</h2>
+      <ul class="list" id="phrases"></ul>
+    </section>
+    <section class="card">
+      <h2>What it believes</h2>
+      <ul class="list" id="beliefs"></ul>
+      <div style="margin-top:12px"><button class="btn" id="reset" title="Wipe the baby mind: it starts over knowing nothing">Start the baby over</button></div>
+    </section>
+  </div>
+</main>
+<div class="msgbar" id="msg"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let data = null, lastLen = -1;
+function toast(t) { const m = $('#msg'); m.textContent = t; m.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => m.classList.remove('show'), 3000); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const scoreColor = (n) => (n >= 60 ? 'var(--good)' : n >= 30 ? 'var(--warn)' : 'var(--bad)');
+
+function render() {
+  const d = data;
+  const st = $('#status');
+  st.classList.toggle('on', d.running);
+  $('#statusText').textContent = d.running
+    ? (d.stopping ? 'Stopping…' : d.waiting ? 'Pausing to stay inside the free limit…' : `Talking · ${d.exchanges}/${d.max}${d.voice ? ' · in Discord' : ''}`)
+    : (d.error ? `Stopped: ${d.error}` : 'Quiet');
+  $('#start').hidden = d.running; $('#stop').hidden = !d.running;
+  $('#topic').disabled = d.running;
+  if (document.activeElement !== $('#voices')) $('#voices').checked = d.voices;
+  $('#reset').disabled = d.running;
+  // chat (only re-drawn when something new came in, so scrolling isn't disturbed)
+  const sig = `${d.transcript.length}:${d.transcript.at(-1)?.closeness ?? ''}`;
+  if (sig !== lastLen) {
+    const chat = $('#chat');
+    const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 60;
+    chat.innerHTML = d.transcript.length ? d.transcript.map((t) => {
+      if (t.who === 'note') return `<div class="note">${esc(t.text)}</div>`;
+      if (t.who === 'lyra') return `<div class="msg lyra"><div class="who">Lyra${t.model ? ` <span class="n" style="font-weight:400;text-transform:none;color:var(--muted)">${esc(t.model)}</span>` : ''}</div>${esc(t.text)}</div>`;
+      return `<div class="msg baby"><div class="who">${t.closeness != null ? `<span class="score" style="color:${scoreColor(t.closeness)}">${t.closeness}% close</span>` : ''}Baby</div>${esc(t.text)}
+        <div class="meta">${t.from?.startsWith('a pattern') ? '🧩 ' : ''}${esc(t.from)}</div>${t.better ? `<div class="better">Lyra wanted: “${esc(t.better)}”</div>` : ''}</div>`;
+    }).join('') : '<p class="empty">Press Start: Lyra will greet the baby mind and start teaching it.</p>';
+    if (atBottom || lastLen === -1) chat.scrollTop = chat.scrollHeight;
+    lastLen = sig;
+  }
+  // the mind
+  const m = d.mind;
+  $('#sEx').textContent = m.exchanges;
+  $('#sPh').textContent = m.phrases;
+  const last = d.scores.slice(-10);
+  $('#sAvg').textContent = `${last.length ? Math.round(last.reduce((a, b) => a + b, 0) / last.length) : 0}%`;
+  $('#sReq').textContent = `${d.requestsLastMinute}`;
+  $('#sReq').style.color = d.requestsLastMinute >= d.budget ? 'var(--warn)' : '';
+  chart(d.scores);
+  $('#pCount').textContent = m.patternCount ? `(${m.patternCount})` : '';
+  const gap = (s) => esc(s).replace(/___/g, '<b style="color:var(--baby)">___</b>');
+  $('#patterns').innerHTML = m.patterns.length ? m.patterns.map((p) => `<li>“${gap(p.ask)}” → “${gap(p.answer)}” <span class="n">×${p.n}</span></li>`).join('') : '<li class="empty">None yet.</li>';
+  $('#phrases').innerHTML = m.topPhrases.length ? m.topPhrases.map((p) => `<li>“${esc(p.text)}” <span class="n">×${p.uses}</span></li>`).join('') : '<li class="empty">Nothing yet.</li>';
+  $('#beliefs').innerHTML = m.beliefs.length ? m.beliefs.map((b) => `<li>${esc(b.subj)} <i>${esc(b.rel)}</i> ${esc(b.obj)} <span class="n">${b.conf}%</span></li>`).join('') : '<li class="empty">Nothing yet.</li>';
+}
+
+function chart(scores) {
+  const svg = $('#chart');
+  if (!scores.length) { svg.innerHTML = '<text x="150" y="58" text-anchor="middle" fill="currentColor" opacity=".45" font-size="12">no lessons yet</text>'; return; }
+  const w = 300, h = 110, n = scores.length;
+  const x = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * (w - 8) + 4);
+  const y = (v) => h - 6 - (v / 100) * (h - 12);
+  // a rolling average of 5 shows the trend through the noise
+  const avg = scores.map((_, i) => { const s = scores.slice(Math.max(0, i - 4), i + 1); return s.reduce((a, b) => a + b, 0) / s.length; });
+  svg.innerHTML = `<line x1="0" x2="${w}" y1="${y(50)}" y2="${y(50)}" stroke="currentColor" opacity=".12" stroke-dasharray="3 3"/>` +
+    scores.map((v, i) => `<circle cx="${x(i)}" cy="${y(v)}" r="2" fill="var(--baby)" opacity=".45"/>`).join('') +
+    `<polyline fill="none" stroke="var(--baby)" stroke-width="2" points="${avg.map((v, i) => `${x(i)},${y(v)}`).join(' ')}"/>`;
+}
+
+async function load() { data = await api('GET', '/api/core-lab'); render(); }
+$('#start').onclick = async () => { try { toast((await api('POST', '/api/core-lab/start', { topic: $('#topic').value, voices: $('#voices').checked })).message); load(); } catch (err) { toast(err.message); } };
+$('#stop').onclick = async () => { try { toast((await api('POST', '/api/core-lab/stop')).message); load(); } catch (err) { toast(err.message); } };
+$('#voices').onchange = async () => { try { toast((await api('POST', '/api/core-lab/voices', { on: $('#voices').checked })).message); } catch (err) { toast(err.message); } };
+$('#reset').onclick = async () => {
+  if (!confirm('Wipe the baby mind? It forgets everything it learned and starts over.')) return;
+  try { toast((await api('POST', '/api/core-lab/reset')).message); lastLen = -1; load(); } catch (err) { toast(err.message); }
+};
+load().catch((err) => toast(`Couldn't load: ${err.message}`));
+setInterval(() => load().catch(() => {}), 2000);
+</script>
+</body>
+</html>

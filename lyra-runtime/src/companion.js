@@ -139,7 +139,8 @@ export async function planTurn(history, speaker, text, tools) {
         `Reply as JSON only: {"actions": [{"tool": "<name>", "query": "<web_search only>"}], "reason": "<a few words>"}. Use {"actions": []} when nothing is needed.`,
     },
     { role: 'user', content: `${context ? `Conversation so far:\n${context}\n\n` : ''}Latest message from ${speaker.name}: ${text}` },
-  ]).catch((err) => {
+  ], { fast: true }).catch((err) => {
+    // all planning models slow or down: her keyword triggers below still pick the obvious tools
     activity('error', { where: 'planning', message: err.message });
     return null;
   });
@@ -176,7 +177,10 @@ export async function planTurn(history, speaker, text, tools) {
   // her YouTube drafts waiting for his OK (yt-channel.js)
   try {
     const yt = await import('./yt-channel.js');
-    if ((yt.youtubePending() && /\b(post|yes|yeah|yep|skip|change|reply|comment|go ahead|send it|do it|ok(ay)?|looks good|another|try again|different|#\d+)\b/.test(low)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
+    // clear YouTube words, or a short bare "yes / ok / post it" (2026-11-25: "are you ok honey?" counted as an answer)
+    const draftWords = /\b(post( it)?|skip( it)?|another|try again|different (one|idea)|reply|comment|draft|#\d+)\b/.test(low);
+    const shortYes = low.split(/\s+/).filter(Boolean).length <= 4 && /^\W*(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|send it|do it|looks good)\b/.test(low);
+    if ((yt.youtubePending() && (draftWords || shortYes)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
   } catch {}
   // who may share photos, files and links with her (trusted.js)
   if (/\b(trust(ed)?|allow|let|can|may)\b/.test(low) && /\b(send|share|give)\b.{0,40}\b(photos?|pictures?|images?|files?|links?|pdfs?|stuff)\b|\btrusted (list|senders?|people)\b/.test(low)) ensure('trusted_senders');
@@ -522,6 +526,8 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     text: reply,
     ms: Date.now() - started,
     brain: config.brain,
+    // which model wrote it: the big one, or a fallback when it was slow (llm.js)
+    model: config.brain === 'nvidia' ? (await import('./llm.js')).lastChatModel || config.nvidia.model : undefined,
     recalled: memories.length + others.reduce((n, o) => n + o.memories.length, 0),
     tools: calls.map((c) => c.name),
   });

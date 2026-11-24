@@ -380,25 +380,40 @@ class VoiceSession {
     this.pump();
   }
 
+  // A line in a chosen voice (the Core lab's baby mind, core-lab.js), resolved once it has played or been dropped,
+  // so two voices can take turns
+  speakAs(text, { voiceId } = {}) {
+    return new Promise((resolve) => {
+      const clip = synthesize(text, voiceId ? { voiceId } : {});
+      clip.catch(() => {});
+      this.speech.push({ turn: this.turn, clip, text, done: resolve });
+      this.pump();
+    });
+  }
+
   async pump() {
     if (this.pumping) return;
     this.pumping = true;
     try {
       while (this.speech.length) {
         const item = this.speech.shift();
-        if (item.turn !== this.turn) continue;
         try {
-          // Build the audio resource only now, from the downloaded clip, so it's fresh when it plays.
-          const clip = await item.clip;
-          if (!isOggOpus48k(clip)) throw new Error('Fish Audio returned audio in an unexpected format');
           if (item.turn !== this.turn) continue;
-          this.connection.subscribe(this.player); // pauses any music while she talks
-          this.player.play(createAudioResource(audioStream(clip), { inputType: StreamType.OggOpus }));
-        } catch (err) {
-          activity('error', { where: 'text-to-speech', message: err.message });
-          continue;
+          try {
+            // Build the audio resource only now, from the downloaded clip, so it's fresh when it plays.
+            const clip = await item.clip;
+            if (!isOggOpus48k(clip)) throw new Error('Fish Audio returned audio in an unexpected format');
+            if (item.turn !== this.turn) continue;
+            this.connection.subscribe(this.player); // pauses any music while she talks
+            this.player.play(createAudioResource(audioStream(clip), { inputType: StreamType.OggOpus }));
+          } catch (err) {
+            activity('error', { where: 'text-to-speech', message: err.message });
+            continue;
+          }
+          await entersState(this.player, AudioPlayerStatus.Idle, 5 * 60_000).catch(() => this.player.stop(true));
+        } finally {
+          item.done?.();
         }
-        await entersState(this.player, AudioPlayerStatus.Idle, 5 * 60_000).catch(() => this.player.stop(true));
       }
     } finally {
       this.pumping = false;

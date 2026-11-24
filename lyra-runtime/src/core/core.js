@@ -14,7 +14,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { statSync } from 'node:fs';
 import {
-  stripTags, keyWords, fingerprint, hamming, jaccard, sentences, role, shapeOf, toTemplate, fill, closeness, reaction,
+  stripTags, keyWords, fingerprint, hamming, jaccard, sentences, role, shapeOf, toTemplate, fill, closeness, reaction, words, stem,
 } from './text.js';
 import { intentOf, partOfDay, INTENTS } from './situation.js';
 
@@ -25,10 +25,15 @@ const READY_N = 25;      // examples of a kind of moment before it can be "ready
 const READY_SCORE = 0.6; // running closeness to the teacher needed
 const EMA = 0.1;
 
-export function createCore({ file, now = Date.now } = {}) {
+// slots: sentence patterns with a gap (2026-11-25, the Core lab's baby mind only). From "Do you like the moon?" ->
+// "I like moon." it keeps "do you like ___" -> "I like ___", and answers "Do you like the sun?" with "I like sun."
+// Off for Lyra's main Core, so that one works exactly as before.
+export function createCore({ file, now = Date.now, slots = false } = {}) {
   const db = new DatabaseSync(file);
   db.exec(`
     PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS patterns (id INTEGER PRIMARY KEY, ask TEXT NOT NULL, answer TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1,
+      last INTEGER, UNIQUE (ask, answer));
     CREATE TABLE IF NOT EXISTS phrases (id INTEGER PRIMARY KEY, text TEXT UNIQUE NOT NULL, role TEXT NOT NULL,
       uses INTEGER NOT NULL DEFAULT 0, score REAL NOT NULL DEFAULT 0.5, first INTEGER, last INTEGER);
     CREATE TABLE IF NOT EXISTS phrase_intents (phrase INTEGER NOT NULL, intent TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
@@ -75,19 +80,71 @@ export function createCore({ file, now = Date.now } = {}) {
   };
   const meta = (k, v) => (v === undefined ? st.metaGet.get(k)?.v ?? null : st.metaSet.run(k, String(v)));
 
+  // ---------- patterns with a gap (slots) ----------
+  const GAP = '___';
+  const ARTICLES = new Set(['the', 'a', 'an', 'some', 'my', 'your']);
+  const toks = (s) => words(s).filter((w) => !ARTICLES.has(w));
+  const contentWord = (w, text) => w.length > 2 && keyWords(text).includes(stem(w));
+  const escRe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pst = slots ? {
+    add: q('INSERT INTO patterns (ask, answer, n, last) VALUES (?, ?, 1, ?) ON CONFLICT DO UPDATE SET n = n + 1, last = excluded.last'),
+    all: q('SELECT ask, answer, n FROM patterns ORDER BY n DESC, last DESC LIMIT 500'),
+  } : null;
+  // a word in the question that the answer reuses becomes the gap in both
+  function learnPatterns(text, teacher, t) {
+    const q = toks(text);
+    let learned = 0;
+    for (const w of new Set(q)) {
+      if (learned >= 3 || !contentWord(w, text)) continue;
+      const re = new RegExp(`\\b${escRe(w)}\\b`, 'i');
+      const s = sentences(teacher).find((x) => re.test(x));
+      if (!s) continue;
+      const ask = q.map((x) => (x === w ? GAP : x)).join(' ');
+      if (ask.split(GAP).length !== 2) continue; // the word once in the question
+      pst.add.run(ask, s.replace(new RegExp(`\\b${escRe(w)}\\b`, 'gi'), GAP), t);
+      learned++;
+    }
+  }
+  // a question that fits a pattern except for one word: the answer with that word in the gap
+  function fromPattern(text) {
+    const q = toks(text);
+    let best = null;
+    for (const p of pst.all.all()) {
+      const a = p.ask.split(' ');
+      if (a.length !== q.length) continue;
+      let gap = -1, ok = true;
+      for (let i = 0; i < a.length && ok; i++) {
+        if (a[i] === GAP) gap = i;
+        else if (a[i] !== q[i]) ok = false;
+      }
+      if (!ok || gap < 0 || !contentWord(q[gap], text)) continue;
+      if (!best || p.n > best.n) best = { ...p, word: q[gap] };
+    }
+    return best ? { text: best.answer.split(GAP).join(best.word), pattern: `${best.ask} → ${best.answer}` } : null;
+  }
+
   // ---------- speaking: her own draft, built only from what she has learned ----------
   const replyFrom = (ids, name) => ids.split(',').map((id) => st.phraseText.get(Number(id))?.text).filter(Boolean).map((t) => fill(t, name)).join(' ');
 
   function draft(text, speaker = {}) {
     const intent = intentOf(text), toks = keyWords(text), fp = fingerprint(toks), part = partOfDay(new Date(now()));
-    let best = null, bestScore = 0;
+    let best = null, bestScore = 0, exact = false;
     for (const c of st.casesFor.all(intent)) {
       const ct = c.toks ? c.toks.split(' ') : [];
-      const s = 0.55 * jaccard(toks, ct) + 0.25 * (1 - hamming(fp, c.fp) / 64) + 0.08 * (c.speaker === speaker.id) +
+      const j = jaccard(toks, ct);
+      const s = 0.55 * j + 0.25 * (1 - hamming(fp, c.fp) / 64) + 0.08 * (c.speaker === speaker.id) +
         0.05 * (c.part === part) + 0.07 * Math.max(-1, Math.min(1, c.reward));
-      if (s > bestScore) { bestScore = s; best = c; }
+      if (s > bestScore) { bestScore = s; best = c; exact = j === 1; }
     }
-    if (best && bestScore >= 0.35) return { intent, text: replyFrom(best.reply, speaker.name), confidence: Math.round(bestScore * 100) / 100, from: 'memory of a similar moment' };
+    const memory = best && bestScore >= 0.35 ? { intent, text: replyFrom(best.reply, speaker.name), confidence: Math.round(bestScore * 100) / 100, from: 'memory of a similar moment' } : null;
+    // the same question it was taught before: that answer (so a correction like "the sky is blue" sticks); otherwise
+    // a pattern with a gap beats a loose memory
+    if (memory && exact) return { ...memory, from: 'memory of this exact question' };
+    if (slots) {
+      const p = fromPattern(text);
+      if (p) return { intent, text: p.text, confidence: 0.8, from: `a pattern with a gap: ${p.pattern}` };
+    }
+    if (memory) return memory;
     // nothing close: build one from the usual shape for this kind of moment, with her best phrases
     const shape = st.topShape.get(intent)?.shape;
     if (!shape) return { intent, text: '', confidence: 0, from: 'nothing learned yet' };
@@ -127,6 +184,7 @@ export function createCore({ file, now = Date.now } = {}) {
       ids.push(id);
     }
     if (!ids.length) return null;
+    if (slots) learnPatterns(text, teacher, t);
     st.shapeAdd.run(intent, shapeOf(teacher));
     const toks = keyWords(text).slice(0, 40);
     st.caseAdd.run(t, sid, intent, partOfDay(new Date(t)), fingerprint(toks), toks.join(' '), ids.join(','), mine.text.slice(0, 400), score);
@@ -268,6 +326,7 @@ export function createCore({ file, now = Date.now } = {}) {
       beliefs: q('SELECT subj, rel, obj, conf, n, source, why FROM beliefs ORDER BY conf DESC, n DESC LIMIT 40').all()
         .map((b) => ({ ...b, conf: Math.round(b.conf * 100) })),
       recent,
+      ...(slots ? { patterns: q('SELECT ask, answer, n FROM patterns ORDER BY n DESC, last DESC LIMIT 12').all(), patternCount: count('SELECT COUNT(*) AS n FROM patterns') } : {}),
       sizeBytes: sizeBytes(),
       lastConsolidation: Number(meta('lastConsolidation')) || null,
     };
