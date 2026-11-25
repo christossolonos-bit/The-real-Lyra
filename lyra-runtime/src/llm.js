@@ -112,7 +112,7 @@ const LIGHT_TOOLS = new Set(['guide', 'request_tool', 'thread', 'threads', 'note
 
 async function startChat(messages, tools, voice = false, force = null, important = false) {
   if (config.brain === 'openrouter') return openRouterChat(messages, tools, voice, force);
-  if (config.brain === 'nvidia') return nvidiaChat(messages, tools, force, important);
+  if (config.brain === 'nvidia') return nvidiaChat(messages, tools, force, important, voice);
   const request = {
     model: config.ollama.model,
     messages,
@@ -188,7 +188,7 @@ export const bigModelSlow = () => Date.now() < bigSlowUntil;
 export let lastChatModel = '';
 // once the big model was too slow, it's skipped for slowPauseMs (no 8 s wait on every round), then tried again
 let bigSlowUntil = 0;
-async function* nvidiaChat(messages, tools, force = null, important = false) {
+async function* nvidiaChat(messages, tools, force = null, important = false, voice = false) {
   if (!config.nvidia.apiKey) throw new Error('NVIDIA is the teacher, but NVIDIA_API_KEY is empty in .env');
   const models = [config.nvidia.model, ...(config.nvidia.fallbackModels || [])].filter((m, i, a) => m && a.indexOf(m) === i);
   // with real tools in hand, the big model is always tried and gets toolWaitMs; plain chat skips it while it's slow
@@ -200,7 +200,7 @@ async function* nvidiaChat(messages, tools, force = null, important = false) {
     let first;
     let it;
     try {
-      const res = await nvidiaRequest(models[i], messages, tools, force, ac.signal);
+      const res = await nvidiaRequest(models[i], messages, tools, force, ac.signal, voice);
       it = streamOpenAIChat(res, 'NVIDIA')[Symbol.asyncIterator]();
       first = await it.next(); // the first words (or a tool call): the model is answering
     } catch (err) {
@@ -222,9 +222,10 @@ async function* nvidiaChat(messages, tools, force = null, important = false) {
 // a fallback model is smaller and makes things up more easily (2026-11-25: an invented "chicken and dumplings"
 // evening went into his diary): stricter rules, and calmer sampling
 const FALLBACK_RULES = 'Strict rules for this reply: only say things that are in this conversation, your memories above or a tool result. ' +
-  'Never invent past events, plans, people or things he said; if you don\'t know, ask. Only use a tool when his latest message clearly asks for it. ' +
-  'For a reminder at a clock time he named, pass that exact time as a date-time (like 2026-11-25T20:00), never "in N hours".';
-async function nvidiaRequest(model, messages, tools, force, signal) {
+  'Never invent past events, plans, people or things anyone said; if you don\'t know, ask. Only use a tool when the latest message clearly asks for it. ' +
+  'For a reminder at a clock time they named, pass that exact time as a date-time (like 2026-11-25T20:00), never "in N hours". ' +
+  'Never repeat or quote their message and never start with a "[Name]:" label: just answer. Keep to the length asked for above (in a voice call: 1 to 3 short sentences).';
+async function nvidiaRequest(model, messages, tools, force, signal, voice = false) {
   const fallback = model !== config.nvidia.model;
   let msgs = messages.map(toOpenAI);
   if (fallback) {
@@ -234,7 +235,8 @@ async function nvidiaRequest(model, messages, tools, force, signal) {
   const body = {
     model,
     stream: true,
-    max_tokens: config.nvidia.maxTokens,
+    // a fallback in a voice call can't ramble: about 3 sentences (2026-11-25: it spoke 10 for a hello)
+    max_tokens: fallback && voice ? Math.min(config.nvidia.maxTokens || 256, 110) : config.nvidia.maxTokens,
     temperature: fallback ? 0.3 : 0.6,
     top_p: 0.95,
     messages: msgs,

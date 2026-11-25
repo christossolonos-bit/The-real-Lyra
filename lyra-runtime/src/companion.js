@@ -79,7 +79,29 @@ function systemPrompt({ voice, speaker, perms, memories, others, earlier, extra,
   if (extra) parts.push(extra);
   parts.push(timeLine()); // Cyprus time, with the part of the day (time.js)
   parts.push(presenceLine()); // "Chris is out, on his phone" (personal.js), or nothing
+  parts.push(answeringLine({ speaker, perms, others, voice }));
   return parts.filter(Boolean).join('\n\n');
+}
+
+// a reply that opens by quoting their message ("[Chris]: Hey Lyra, welcome back") loses that opening line
+function unquote(reply, text) {
+  let r = String(reply || '');
+  const m = r.match(/^\s*\[[^\]\n]{1,40}\]:[^\n]*(\n+|$)/);
+  if (m) r = r.slice(m[0].length);
+  return r.trim() || String(reply || '').trim();
+}
+
+// Who she's answering this turn, stated plainly and last, so it wins over anything general (2026-11-25: a friend said
+// "You're just a tool" in a voice call and she answered "Chris, that's not fair…", because the persona says the
+// person she's talking to is Chris and nobody else is listening)
+function answeringLine({ speaker, perms, others, voice }) {
+  if (!speaker?.name) return '';
+  const also = (others || []).map((o) => o.name).filter((n) => n && n !== speaker.name);
+  const owner = Boolean(perms?.owner);
+  return `RIGHT NOW YOU'RE ANSWERING: ${speaker.name}${owner ? ' (Chris, who made you)' : ' (this is NOT Chris)'}. ` +
+    `The latest message is from ${speaker.name}: talk to ${speaker.name}, and don't address your reply to anyone else.` +
+    (also.length ? ` Also here${voice ? ' in the call' : ''}: ${also.join(', ')}.` : '') +
+    (owner ? '' : ` What you know about Chris is about Chris, not about ${speaker.name}.`);
 }
 
 export const SEARCH_ANNOUNCEMENT = 'Okay, let me search for that.';
@@ -309,6 +331,9 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   const started = Date.now();
 
   let userContent = cue ? `(${cue})` : `[${speaker.name}]: ${text}`;
+  // someone other than Chris: said right next to their message too, where even a small model can't miss it
+  // (2026-11-25: "Chris, that's not fair. TestFriend doesn't know what they're talking about")
+  if (!cue && !perms.owner) userContent += `\n\n(This message is from ${speaker.name}, not Chris. Answer ${speaker.name} directly, speaking to them as "you"; don't talk about them to Chris.)`;
   // Don't loop: she's shown what she just said and told to answer what was said now instead.
   const recentMine = rows.filter((m) => m.role === 'assistant' && (m.name ? m.name === character.name : character.main)).slice(-3).map((m) => m.content);
   // Tool calls and their results aren't part of the history, only what she said. Without this, every
@@ -459,8 +484,17 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // (also when the plan has another tool beside it: "spent 20 on fuel" + a check-in once skipped the money call
   // and claimed it was logged)
   const mustCall = cue ? null : plan.tools.find((n) => LOOKUPS.includes(n)) || null;
+  // a reply that starts by quoting their message ("[Chris]: Hey Lyra…", a smaller fallback model's habit,
+  // 2026-11-25) isn't spoken: the quoted line is dropped, sentence by sentence while it streams
+  let quoting = true;
+  const spoken = onSentence && ((s) => {
+    if (quoting && /^\s*\[[^\]\n]{1,40}\]:/.test(s)) return;
+    if (quoting && text && s.trim() && String(text).includes(s.trim().replace(/[.!?…]+$/, ''))) return; // the rest of the quote
+    quoting = false;
+    return onSentence(s);
+  });
   const chatOpts = {
-    onSentence,
+    onSentence: spoken || undefined,
     tools,
     mustCall,
     runTool: runner,
@@ -469,7 +503,7 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     free: [...ALWAYS, 'request_tool'],
     voice,
   };
-  let reply = stripTags(await chat(messages, chatOpts));
+  let reply = unquote(stripTags(await chat(messages, chatOpts)), text);
 
   // Phantom success: she said something was done, but no tool for it succeeded this turn.
   const phantom = !cue && phantomClaim(reply, succeeded);
