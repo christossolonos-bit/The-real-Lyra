@@ -17,6 +17,7 @@
   .msg{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px;max-width:92%}
   .msg.me{align-self:flex-end;border-color:#244a5a}
   .msg.lyra{align-self:flex-start;border-color:#1d5566}
+  .msg.cast{align-self:flex-start;border-color:#5a4a1d;background:rgba(240,180,69,.06)}
   .msg .who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
   .msg.note{align-self:center;background:none;border:none;color:var(--muted);font-size:12px;font-style:italic;padding:0}
   #bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);width:min(720px,calc(100vw - 32px));display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:8px}
@@ -171,6 +172,19 @@ function handleReply(r) {
   if (r.audio) { audio.src = r.audio; audio.play().catch(() => {}); }
 }
 
+// ---- the cast pops in (Nova, Juno, Marcus, Patrik): after Lyra has finished, in their own voice ----
+// A separate player, so Lyra's lips don't move for someone else's voice; the mic is told, so it doesn't hear them.
+const castAudio = new Audio();
+castAudio.onplay = () => tellSpeaking(true);
+castAudio.onended = castAudio.onerror = () => { tellSpeaking(false); lastActivity = Date.now(); };
+async function castPopIn(m) {
+  for (let i = 0; i < 900 && (speaking || busy || !audio.paused); i++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 500));
+  add('cast', m.text, m.name);
+  lyraBody()?.gesture?.('tilt');
+  if (m.audio) { castAudio.src = m.audio; castAudio.play().catch(() => {}); }
+}
+
 // ---- one typed turn ----
 let busy = false;
 async function exchange(path, body = {}, showUser) {
@@ -245,6 +259,7 @@ function connectEvents() {
       if (m.gesture) lyraBody()?.gesture(m.gesture);
       for (const f of m.remembered || []) add('note', `Lyra will remember: ${f}`);
     }
+    if (m.type === 'popin' && awake) castPopIn(m);
     if (m.type === 'reply') { busy = false; status(''); lyraBody()?.think(false); lastActivity = Date.now(); if (awake) handleReply(m); }
   };
   ev.onerror = () => { earsUp = false; earsChip(); };

@@ -421,6 +421,38 @@ function buildRoutes(bot) {
       return { reply: said, feelings, gestures: [...new Set(gestures)] };
     }),
 
+    // A cast member may pop in after Lyra's hologram reply (cast.js, 2026-11-25). Everything there is spoken, so only
+    // someone with a voice. Returns { popIn: { name, text, voiceId } } or {}.
+    r('POST', '/api/lyra/popin', async ({ body }) => {
+      const cast = await import('../cast.js');
+      const isOwner = Boolean(body.isOwner);
+      const name = isOwner ? 'Chris' : (String(body.name || '').trim().slice(0, 24) || 'Visitor');
+      const conversation = isOwner ? 'hologram' : `hologram:${name.toLowerCase()}`;
+      const text = String(body.text || '').slice(0, 1500), reply = String(body.reply || '').slice(0, 1500);
+      const pick = cast.whoPopsIn({ userText: text, reply, needVoice: true });
+      if (!pick) return {};
+      const { recentMessages } = await import('../memory.js');
+      const recent = recentMessages(conversation, 8).map((m) => ({ name: m.role === 'assistant' ? m.name ?? config.botName : m.name ?? name, text: m.content }));
+      const popIn = await cast.popIn({ conversation, pick, userText: text, reply, recent, ownerName: isOwner ? 'Chris' : name });
+      return popIn ? { popIn } : {};
+    }),
+
+    // The cast's pop-ins: who can pop in, who has a voice, on/off. PUT { id, voiceId } or { off: true|false }.
+    r('GET', '/api/cast', async () => {
+      const cast = await import('../cast.js');
+      const s = cast.castSettings();
+      return { off: Boolean(s.off), members: Object.entries(cast.CAST).map(([id, c]) => ({ id, name: c.name, hasVoice: Boolean(s[id]?.voiceId) })) };
+    }),
+    r('PUT', '/api/cast', async ({ body }) => {
+      const cast = await import('../cast.js');
+      if (typeof body.off === 'boolean') {
+        const { writeFileSync } = await import('node:fs');
+        writeFileSync(path.join(DATA_DIR, 'cast.json'), JSON.stringify({ ...cast.castSettings(), off: body.off }, null, 2));
+      }
+      if (body.id) cast.saveCastVoice(String(body.id).toLowerCase(), body.voiceId);
+      return { ok: true };
+    }),
+
     // ---- Avatar studio (/avatar.html) ----
 
     // The cast: everyone who can appear in the studio, with their name, persona, voice and mood.

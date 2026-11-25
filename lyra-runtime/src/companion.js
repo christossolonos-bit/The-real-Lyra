@@ -157,6 +157,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- trusted_senders when he says who can (or can't any more) send you photos, files or links, or asks who can.\n` +
         `- core_lab for the baby mind in the Core lab: how it's doing, its stage or phrases, how much until it grows, or starting / stopping a lesson.\n` +
+        `- look_at_screen when he asks you to look at his screen or at what he's working on right now ("look at my screen", "what do you think of this edit?", "can you see this?", "check this out" while at his computer).\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
         `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
@@ -762,6 +763,8 @@ const CLAIMS = {
   git: /\b(i('ve| have)? (pushed|committed)|(pushed|committed) (it|them|the changes))\b/i,
   avatar_mode: /\bavatar mode (is )?(now )?(on|off)\b/i,
   rebuild_memories: /\b(started|kicked off) (the )?(memory )?rebuild\b/i,
+  // "I can see your timeline…" without a look (2026-11-25)
+  look_at_screen: /\b(i can see (your|the|that) (screen|timeline|edit|window|tab)|on your screen (i see|there'?s|you'?ve got)|looking at your screen( now| right now)?,|i('ve| have)? (looked|had a look|taken a look) at your screen)\b/i,
 };
 // Newer tools that make the same claims true (2026-11-23: "Sent it to your phone" after the shopping list was DMed
 // was "corrected" into "it didn't go through", because only send_file counted)

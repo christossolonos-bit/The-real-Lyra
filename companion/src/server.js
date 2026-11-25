@@ -49,12 +49,12 @@ async function think(name, isOwner, userContent) {
 }
 
 // ---------- voice: exactly one request ----------
-async function speak(text) {
-  if (!text || !process.env.FISH_API_KEY || !process.env.FISH_VOICE_LYRA) return null;
+async function speak(text, voiceId = process.env.FISH_VOICE_LYRA) {
+  if (!text || !process.env.FISH_API_KEY || !voiceId) return null;
   const res = await fetch("https://api.fish.audio/v1/tts", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.FISH_API_KEY}`, "Content-Type": "application/json", model: process.env.FISH_MODEL || "s1" },
-    body: JSON.stringify({ text, reference_id: process.env.FISH_VOICE_LYRA, format: "mp3", prosody: { speed: 1, volume: 0 } }),
+    body: JSON.stringify({ text, reference_id: voiceId, format: "mp3", prosody: { speed: 1, volume: 0 } }),
     signal: AbortSignal.timeout(60000),
   });
   if (!res.ok) throw new Error(`voice ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -181,6 +181,8 @@ async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cu
       if (runtimeUp !== true) { runtimeUp = true; console.log("Using Lyra's runtime mind (one memory with Discord)."); }
       let audio = null, voiceError = null;
       if (out.speech && voice === "page") { try { audio = await speak(out.speech); } catch (e) { voiceError = e.message; } }
+      // a cast member may pop in after her (cast.js in the runtime): asked for, or now and then
+      if (!cue && !thought && out.speech && voice === "page") castFollow({ name, isOwner, text: text ?? content, reply: out.speech });
       return { ...out, audio, voiceError };
     } catch (e) {
       if (runtimeUp !== false) { runtimeUp = false; console.log(`Lyra's runtime isn't reachable (${e.message}); using the standalone mind.`); }
@@ -202,6 +204,23 @@ async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cu
     if (out.speech && voice === "page") { try { audio = await speak(out.speech); } catch (e) { voiceError = e.message; } }
     return { ...out, audio, voiceError, state: mind.moodState() };
   } finally { busy = false; }
+}
+
+// Nova, Juno, Marcus or Patrik add a line in their own voice after Lyra (owner, 2026-11-25). Runs after her reply
+// has gone to the page, so she's never slowed down; the page plays it once she has finished speaking.
+async function castFollow({ name, isOwner, text, reply }) {
+  try {
+    const res = await fetch(`${RUNTIME}/api/lyra/popin`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, isOwner, text, reply }), signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) return;
+    const pop = (await res.json()).popIn;
+    if (!pop?.text || !pop.voiceId) return;
+    let audio = null;
+    try { audio = await speak(pop.text, pop.voiceId); } catch (e) { console.log(`cast voice failed: ${e.message}`); }
+    broadcast("popin", { name: pop.name, text: pop.text, audio });
+  } catch { /* the runtime is optional here */ }
 }
 
 function who(body) {

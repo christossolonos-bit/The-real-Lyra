@@ -363,6 +363,8 @@ class VoiceSession {
       });
       clearTimeout(filler);
       if (reply && config.voice.postTranscripts) this.post(`🔊 ${reply}`);
+      // a cast member may pop in after her, in their own voice (cast.js, 2026-11-25); queued after her lines
+      if (reply && turn === this.turn) this.castFollow(text, reply, speaker, turn).catch(() => {});
     }).catch((err) => activity('error', { where: 'voice reply', message: err.message }))
       .finally(() => this.pending--);
   }
@@ -424,6 +426,19 @@ class VoiceSession {
         .catch((err) => activity('error', { where: 'avatar live lipsync', message: err.message }));
     }
     this.pump();
+  }
+
+  // Nova, Juno, Marcus or Patrik add a line after Lyra (only someone with a Fish voice: a call is all speech)
+  async castFollow(text, reply, speaker, turn) {
+    const cast = await import('../cast.js');
+    const pick = cast.whoPopsIn({ userText: text, reply, needVoice: true });
+    if (!pick) return;
+    const { recentMessages } = await import('../memory.js');
+    const recent = recentMessages(this.conversation, 8).map((m) => ({ name: m.role === 'assistant' ? m.name ?? config.botName : m.name ?? 'Someone', text: m.content }));
+    const pop = await cast.popIn({ conversation: this.conversation, pick, userText: text, reply, recent, ownerName: speaker?.name || 'Chris' });
+    if (!pop || turn !== this.turn) return;
+    await this.speakAs(pop.text, { voiceId: pop.voiceId });
+    if (config.voice.postTranscripts) this.post(`🔊 **${pop.name}:** ${pop.text}`);
   }
 
   // A line in a chosen voice (the Core lab's baby mind, core-lab.js), resolved once it has played or been dropped,

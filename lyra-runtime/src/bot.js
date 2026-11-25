@@ -161,12 +161,30 @@ function createClient() {
       for (const [i, chunk] of chunks.slice(1).entries()) {
         await message.channel.send({ content: chunk, files: i + 1 === last ? files : [], allowedMentions: { parse: [] } });
       }
+      // a cast member may pop in after her (cast.js, 2026-11-25): as a message here, and spoken too if she's in a
+      // voice call in this server and they have a voice
+      if (reply) castFollowText({ message, text, reply, speaker }).catch((err) => activity('error', { where: 'cast pop-in', message: err.message }));
     } catch (err) {
       clearInterval(typing);
       activity('error', { where: 'text reply', message: err.message });
       await message.reply('My brain glitched for a sec, try again?').catch(() => {});
     }
   });
+
+  async function castFollowText({ message, text, reply, speaker }) {
+    const cast = await import('./cast.js');
+    const pick = cast.whoPopsIn({ userText: text, reply, needVoice: false });
+    if (!pick) return;
+    const { recentMessages } = await import('./memory.js');
+    const conversation = `text:${message.channelId}`;
+    const recent = recentMessages(conversation, 8).map((m) => ({ name: m.role === 'assistant' ? m.name ?? config.botName : m.name ?? 'Someone', text: m.content }));
+    const pop = await cast.popIn({ conversation, pick, userText: text, reply, recent, ownerName: speaker?.name || 'Chris' });
+    if (!pop) return;
+    await new Promise((r) => setTimeout(r, 1500)); // a beat after her, like someone walking up
+    await message.channel.send({ content: `**${pop.name}:** ${pop.text}`, allowedMentions: { parse: [] } });
+    const session = message.guild && sessions.get(message.guild.id);
+    if (session && pop.voiceId) session.speakAs(pop.text, { voiceId: pop.voiceId }).catch(() => {});
+  }
 
   // Leave voice when everyone else has left.
   client.on(Events.VoiceStateUpdate, (oldState, newState) => {

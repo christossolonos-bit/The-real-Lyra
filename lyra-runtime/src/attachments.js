@@ -85,6 +85,8 @@ async function vision(prompt, buf, mime = 'image/jpeg', maxTokens = 350) {
   }
   throw last;
 }
+// any picture through her eyes (the screen tool uses it too)
+export const lookAtImage = (buf, mime, prompt, maxTokens = 600) => vision(prompt, buf, mime, maxTokens);
 const lookAt = (buf, mime, question) => vision(`Chris sent this photo${question ? ` with the message: "${question}"` : ''}. Describe plainly what's in it, read out any text in it, and note anything that matters for his message. 2 to 6 short sentences. Don't guess beyond what's visible.`, buf, mime);
 const IMG_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 

@@ -39,6 +39,7 @@ import { YOUTUBE_TOOLS } from './yt-channel.js';
 import { TRUSTED_TOOLS } from './trusted.js';
 import { CORE_LAB_TOOLS } from './core-lab.js';
 import { DOCUMENT_TOOLS } from './attachments.js';
+import { screenAvailable } from './screen.js';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // Discord's upload limit for bots in most servers
 
@@ -804,6 +805,28 @@ export const TOOLS = {
     run: newsFeedsTool,
   },
 
+  look_at_screen: {
+    enabled: (ctx) => Boolean(ctx.perms?.owner && screenAvailable()),
+    definition: {
+      type: 'function',
+      function: {
+        name: 'look_at_screen',
+        description:
+          "Owner only. Take ONE look at your owner's computer screen right now, when he asks you to in this message (\"look at my screen\", \"what do you think of this edit?\", \"can you see this?\"). " +
+          'You get a description of what is on it; then answer him like a friend sitting next to him (feedback, ideas, what you notice). Never look without being asked; nothing is saved.',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: 'What he wants you to look at or give feedback on, in his words' },
+            screen: { type: 'string', enum: ['main', 'all'], description: 'main = his main monitor (default); all = every monitor side by side' },
+          },
+          required: ['question', 'screen'],
+        },
+      },
+    },
+    run: lookAtScreenTool,
+  },
+
   sleep: {
     enabled: (ctx) => Boolean(ctx.perms?.owner || ctx.perms?.friend),
     definition: {
@@ -894,7 +917,27 @@ function allRequired(def) {
 // Someone asking for music: "play...", "put on...", "a song", "some music", "queue", "sing", "yes" to her offer...
 const MUSIC_ASK = /\b(play|put (it |something |that |this )?on|queue|song|songs|music|track|tune|playlist|spotify|radio|sing|make (me |us )?(a |some )?(song|beat|track)|yes|yeah|yep|sure|go ahead|do it|please)\b/i;
 
+// The screen is looked at only when this very message asks for it (owner, 2026-11-25).
+const SCREEN_ASK = /\b(screens?|monitors?|desktop|look at (this|that|it|my|what)|see (this|that|it|what i|my)|can you see|have a look|take a look|check (this|that|it) out|what do you think (of|about) (this|that|it|my)|how does (this|that|it) look|does (this|that|it) look)\b/i;
+
 const STOP_ASK = /\b(stop|pause|turn (it |that |this |the music |the song )?off|shut (it |that )?(off|down)|kill (it|that|the music|the song)|enough|no more music|silence)\b/i;
+
+async function lookAtScreenTool({ question = '', screen = 'main' }) {
+  const { captureScreen } = await import('./screen.js');
+  const { lookAtImage } = await import('./attachments.js');
+  const shot = await captureScreen({ which: screen === 'all' ? 'all' : 'primary' });
+  const ask = String(question || '').slice(0, 400);
+  const seen = await lookAtImage(shot.buf, shot.mime,
+    `This is a screenshot of Chris's computer screen${screen === 'all' ? ' (all monitors side by side)' : ''}, taken just now because he asked: "${ask || 'look at my screen'}". ` +
+    'Describe what is on it that matters for his question: which app and what he is working on, the important details, and any text that matters (read it exactly). ' +
+    'If it is creative work (a video edit, an image, a page, a script), also note what stands out: what works, what looks off. Plain sentences, no guessing beyond what is visible.', 700);
+  activity('screen', { question: ask.slice(0, 120), screen, size: shot.size });
+  return `Looked at his ${screen === 'all' ? 'screens' : 'screen'} (${shot.size}; not saved). What's on it:
+${seen}
+` +
+    'Now answer him in your own words, like a friend looking over his shoulder: what you see, what you think, any suggestion. ' +
+    'Talk only about what this description says is there: do not invent dialogue, timings, colours, frames or anything else it does not mention (ask him if you need to know). Do not read this description out.';
+}
 
 export async function runTool(name, args = {}, ctx = {}) {
   const tool = TOOLS[name];
@@ -918,6 +961,10 @@ export async function runTool(name, args = {}, ctx = {}) {
     const startsMusic =
       (name === 'music' && ['play', 'queue'].includes(String(parsed.action || 'play'))) ||
       name === 'generate_music' || name === 'sing';
+    if (name === 'look_at_screen' && !SCREEN_ASK.test(String(ctx.userText || ''))) {
+      log(false, 'screen not asked for');
+      return structured(name, "Error: he didn't ask you to look at his screen in this message. Only look when he asks; you can offer.", ctx, parsed);
+    }
     if (startsMusic && !MUSIC_ASK.test(String(ctx.userText || ''))) {
       log(false, 'music not asked for');
       return structured(name, "Error: nobody asked for music in this message. Only play, queue or make songs when someone asks you to; you can offer, then wait for their yes.", ctx, parsed);
