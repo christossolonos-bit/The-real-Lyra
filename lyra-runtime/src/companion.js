@@ -156,6 +156,7 @@ export async function planTurn(history, speaker, text, tools) {
         `- youtube for your YouTube account on his channel: his answer to a reply or comment you drafted ("post it", "change it to…", "another" for a different idea, "skip"), his channel link to watch, or what's waiting.\n` +
         `- birthdays when he tells you someone's birthday or anniversary (family, friends), or asks when someone's birthday is or whose is coming up.\n` +
         `- trusted_senders when he says who can (or can't any more) send you photos, files or links, or asks who can.\n` +
+        `- core_lab for the baby mind in the Core lab: how it's doing, its stage or phrases, how much until it grows, or starting / stopping a lesson.\n` +
         `- sing_song when he asks you to sing a song (a title or a song he sent) in your own voice / cover it, or to stop singing.\n` +
         `- shifts when he tells you when he works ("work Friday 6 to 2"), asks about his shifts, or sends a photo of his work schedule / rota.\n` +
         `- day when he tells you how his day went (the night wrap-up), asks for his morning brief or the weather, tells you his town, or sets when he wants the brief.\n` +
@@ -206,6 +207,8 @@ export async function planTurn(history, speaker, text, tools) {
     const shortYes = low.split(/\s+/).filter(Boolean).length <= 4 && /^\W*(yes|yeah|yep|yup|sure|ok(ay)?|go ahead|send it|do it|looks good)\b/.test(low);
     if ((yt.youtubePending() && (draftWords || shortYes)) || (/\byoutube\b/.test(low) && /\b(comment|repl|channel|viewer|draft)/.test(low))) ensure('youtube');
   } catch {}
+  // the baby mind in the Core lab (core-lab.js)
+  if (/\b(baby( mind| core)?|core ?lab|toddler|the lesson)\b/.test(low) || (/\bcore\b/.test(low) && /\b(phrases?|stage|grow|learn|progress|check)/.test(low))) ensure('core_lab');
   // who may share photos, files and links with her (trusted.js)
   if (/\b(trust(ed)?|allow|let|can|may)\b/.test(low) && /\b(send|share|give)\b.{0,40}\b(photos?|pictures?|images?|files?|links?|pdfs?|stuff)\b|\btrusted (list|senders?|people)\b/.test(low)) ensure('trusted_senders');
   // his diary and his family's birthdays (diary.js, birthdays.js)
@@ -735,6 +738,8 @@ const CLAIMS = {
   files: /\b(i('ve| have)? (saved|written|wrote|created|edited|updated|changed|moved|renamed|copied)\b.{0,40}\b(file|folder|line|script|code|config)|(file|folder|script)\b.{0,25}\b(is |has been )?(saved|created|updated|edited))\b/i,
   obligations: /\b(on (my|the) (list|to-?do)|added (it|that|this) to (my|the) list|it'?s on my list)\b/i,
   youtube: /\b(i'?ve (posted|replied|commented)|(posted|replied) (it|that|on youtube)|it'?s (posted|up) on youtube|reply is (up|posted))\b/i,
+  // "I checked and it still needs about 20 phrases" with no look at the lab (2026-11-25)
+  core_lab: /\bi('ve| have| just)? (checked|looked)\b.{0,80}\b(baby|core|phrases?|toddler|stage|lesson)|\b(baby|toddler)\b.{0,60}\b(needs?|has|knows) (about |around )?\d+ (more )?phrases?|\b(needs?|has|knows) (about |around )?\d+ (more )?phrases?\b.{0,40}\b(toddler|child|big kid|grow|stage)/i,
   reminder: /\b(i'?ll remind you|i will remind you|i'?ll (give you a )?(nudge|ping) you|i'?ve (set|added|scheduled) (a |the |your |that )?reminder|reminder('?s| is| has been) set|i'?ll set (it|that|a reminder|the reminder)( up)?( now)? for)\b/i,
   checkin_consent: /\b(saved (it )?(to|on) your card|on your card|got it saved|noted (it )?on your (card|profile))\b/i,
   music: /\b(it'?s playing|now playing|playing (it )?now|started playing|i'?ve stopped|stopped (the )?(song|music|it)|paused (it|the song|the music))\b/i,

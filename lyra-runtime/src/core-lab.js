@@ -194,3 +194,42 @@ export function labSnapshot() {
       stage: (({ name, level, of, next, length }) => ({ name, level, of, next, length }))(stageOf(s.phrases)) },
   };
 }
+
+// ---------- Lyra's own look at the lab (2026-11-25: asked to "check again", she said the baby needs "about 20
+// phrases" to be a toddler; it's 40, and she had no way to look) ----------
+function labReport() {
+  const s = labSnapshot();
+  const m = s.mind, st = m.stage;
+  const last = s.scores.slice(-10);
+  const close = last.length ? Math.round(last.reduce((a, b) => a + b, 0) / last.length) : null;
+  return `The baby mind, right now: stage "${st.name}" (${st.level} of ${st.of}; answers ${st.length}). ` +
+    `It knows ${m.phrases} phrases and ${m.patternCount} patterns, from ${m.exchanges} lessons. ` +
+    (st.next ? `It grows into a ${st.next.name} at ${st.next.at} phrases: ${Math.max(0, st.next.at - m.phrases)} more to go. ` : 'It is fully grown for now. ') +
+    (close !== null ? `Its last ${last.length} answers came ${close}% close on average. ` : '') +
+    (s.running ? `A conversation is running now (${s.exchanges} of ${s.max} exchanges${s.topic ? `, about ${s.topic}` : ''}${s.voice ? ', in the Discord call' : ''}).` : 'No conversation is running.') +
+    (m.topPhrases.length ? ` Phrases it uses most: ${m.topPhrases.slice(0, 4).map((p) => `"${p.text}"`).join(', ')}.` : '') +
+    ' Use these exact numbers.';
+}
+
+export const CORE_LAB_TOOLS = {
+  core_lab: {
+    enabled: (ctx) => Boolean(ctx?.perms?.owner),
+    definition: { type: 'function', function: {
+      name: 'core_lab',
+      description: 'The Core lab, where you teach the baby mind to talk. status = its real progress (stage, phrases, how many until the next stage, closeness, whether a lesson is running): check this before saying anything about it. ' +
+        'start = begin a lesson (topic optional; voices = speak in the Discord call), only when Chris asks. stop = end the running lesson.',
+      parameters: { type: 'object', properties: {
+        action: { type: 'string', enum: ['status', 'start', 'stop'] },
+        topic: { type: 'string' }, voices: { type: 'boolean' },
+      }, required: ['action'] },
+    } },
+    run: async (a) => {
+      try {
+        if (a.action === 'status') return labReport();
+        if (a.action === 'start') return `${labStart({ topic: a.topic || '', voices: Boolean(a.voices) }).message} ${labReport()}`;
+        if (a.action === 'stop') return labStop().message;
+        return 'Error: action must be status, start or stop.';
+      } catch (err) { return `Error: ${err.message}`; }
+    },
+  },
+};

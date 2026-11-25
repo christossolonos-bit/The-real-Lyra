@@ -412,7 +412,22 @@ export async function quickJson(messages, { timeoutMs = 45_000, maxTokens, fast 
     }
     throw lastErr;
   }
-  if (config.brain === 'nvidia') return nvidiaJson(messages, config.nvidia.model, { timeoutMs, maxTokens });
+  if (config.brain === 'nvidia') {
+    // the big model, and if it fails (2026-11-25: "content safety screening is temporarily unavailable", 503, and
+    // what Chris had said wasn't saved to her memory), the fallback models do the same job
+    try {
+      return await nvidiaJson(messages, config.nvidia.model, { timeoutMs, maxTokens });
+    } catch (err) {
+      for (const model of config.nvidia.fallbackModels || []) {
+        try {
+          const r = await nvidiaJson(messages, model, { timeoutMs: Math.min(timeoutMs, 30_000), maxTokens });
+          try { (await import('./events.js')).activity('brain', { message: `${config.nvidia.model} failed (${err.message.slice(0, 80)}); ${model} did this job instead` }); } catch {}
+          return r;
+        } catch {}
+      }
+      throw err;
+    }
+  }
   return openRouterJson(messages, { timeoutMs });
 }
 export async function nvidiaJson(messages, model, { timeoutMs, maxTokens, temperature = 0 }) {
