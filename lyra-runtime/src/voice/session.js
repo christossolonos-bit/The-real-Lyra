@@ -159,6 +159,9 @@ function addressed(text) {
 }
 // "Lyra, stop" / "turn it off" / "pause the music" / "enough"...
 const MUSIC_STOP = /\b(stop|pause|turn (it |that |this |the music |the song )?off|shut (it |that )?(off|down)|kill (it|that|the music|the song)|enough|no more music|silence)\b/i;
+// "let me think": said when a reply has no words yet after this long
+const FILLER_AFTER_MS = 2500;
+const FILLERS = ['Hmm, let me think.', 'Give me a second.', 'Let me think about that.', 'Hmm.', 'One moment.', 'Good question. Let me think.'];
 // "Lyra, stop": her name, then stop, in a short line (so "don't stop telling me" or a long sentence that happens to
 // contain both words doesn't cut her off)
 function isStopTalking(text) {
@@ -335,12 +338,18 @@ class VoiceSession {
     this.pending++;
     this.replyChain = this.replyChain.then(async () => {
       const turn = this.turn; // queued after the last reply; only an interruption (interrupt()) drops speech
+      // "let me think" (Chris, 2026-11-25): no words yet after a moment, a short filler first, so a slow reply
+      // doesn't feel like dead air
+      let spoke = false;
+      const filler = setTimeout(() => { if (!spoke && turn === this.turn) this.sayFiller(turn); }, FILLER_AFTER_MS);
       const reply = await respond({
         conversation: this.conversation,
         speaker,
         text,
         voice: true,
         onSentence: (sentence) => {
+          spoke = true;
+          clearTimeout(filler);
           if (turn === this.turn) this.say(sentence, turn);
         },
         discord: this.textChannel ? {
@@ -352,9 +361,26 @@ class VoiceSession {
           notify: (text) => this.reportTask(text),
         } : { voice: this, notify: (text) => this.reportTask(text) },
       });
+      clearTimeout(filler);
       if (reply && config.voice.postTranscripts) this.post(`🔊 ${reply}`);
     }).catch((err) => activity('error', { where: 'voice reply', message: err.message }))
       .finally(() => this.pending--);
+  }
+
+  // A short "let me think" line, a different one from last time. The clips are made once per call and kept, so the
+  // filler plays at once instead of waiting for her voice to be made (and costs almost nothing).
+  sayFiller(turn = this.turn) {
+    this.fillerClips ??= new Map();
+    const pick = FILLERS.filter((f) => f !== this.lastFiller);
+    const text = pick[Math.floor(Math.random() * pick.length)];
+    this.lastFiller = text;
+    if (!this.fillerClips.has(text)) {
+      const clip = synthesize(text);
+      clip.catch(() => this.fillerClips.delete(text));
+      this.fillerClips.set(text, clip);
+    }
+    this.speech.push({ turn, clip: this.fillerClips.get(text), text });
+    this.pump();
   }
 
   // People in the call with her (not bots).

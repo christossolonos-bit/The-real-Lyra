@@ -578,6 +578,13 @@ function buildRoutes(bot) {
       return { ok: true, message: done.length ? `${done.join(' and ')}.` : "She wasn't singing anything." };
     }),
     r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
+    // The Health page (/health.html): what works and what doesn't, at a glance (2026-11-25)
+    r('GET', '/api/health', async () => (await import('../health.js')).healthSnapshot()),
+    r('POST', '/api/health/models', async () => ({ models: await (await import('../health.js')).checkModels() })),
+    // The Memory garden (/memory-garden.html): suggested merges and deletions, nothing changes without his OK
+    r('GET', '/api/garden', async () => (await import('../gardener.js')).gardenSnapshot()),
+    r('POST', '/api/garden/scan', async () => (await import('../gardener.js')).scanGarden()),
+    r('POST', '/api/garden/(?<id>\\d+)/(?<act>accept|dismiss)', async ({ params }) => (await import('../gardener.js')).decide(Number(params.id), params.act)),
     // The Core lab page (/core-lab.html): Lyra talking with a baby mind that learns from her, live (2026-11-25)
     r('GET', '/api/core-lab', async () => (await import('../core-lab.js')).labSnapshot()),
     r('POST', '/api/core-lab/start', async ({ body }) => (await import('../core-lab.js')).labStart(body)),

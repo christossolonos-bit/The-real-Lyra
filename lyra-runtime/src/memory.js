@@ -314,6 +314,12 @@ export function listMemories(userId) {
   return q.listMemories.all(userId);
 }
 
+// every memory with its fingerprint, for the memory gardener (gardener.js)
+export function allMemoriesWithVectors() {
+  return db.prepare('SELECT m.id, m.user_id, m.content, m.created_at, m.embedding, c.name FROM memories m LEFT JOIN contacts c ON c.user_id = m.user_id ORDER BY m.id').all()
+    .map((r) => ({ ...r, v: (() => { try { return JSON.parse(r.embedding); } catch { return null; } })(), embedding: undefined }));
+}
+
 export function forget(userId, id) {
   return id == null ? q.deleteAllMemories.run(userId).changes : q.deleteMemory.run(id, userId).changes;
 }

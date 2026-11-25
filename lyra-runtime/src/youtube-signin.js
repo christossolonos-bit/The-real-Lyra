@@ -27,7 +27,8 @@ const server = http.createServer(async (req, res) => {
     });
     const j = await r.json();
     if (!r.ok || !j.refresh_token) throw new Error(j.error_description || j.error || 'no refresh token returned');
-    saveToken({ refresh_token: j.refresh_token, access_token: j.access_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000 });
+    // signedInAt: in Google's Testing mode the sign-in lasts 7 days; the Health page counts down from here
+    saveToken({ refresh_token: j.refresh_token, access_token: j.access_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000, signedInAt: Date.now() });
     const me = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', { headers: { Authorization: `Bearer ${j.access_token}` } }).then((x) => x.json());
     const name = me.items?.[0]?.snippet?.title;
     done(name ? `Lyra is signed in to YouTube as <b>${name.replace(/</g, '&lt;')}</b>. You can close this tab.` : 'Signed in, but this Google account has no YouTube channel. Sign in again with Lyra\'s account.');
