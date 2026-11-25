@@ -22,6 +22,9 @@ fs.mkdirSync(AUDIO, { recursive: true });
 
 const PORT = Number(process.env.PORT || 8770);
 const MODEL = process.env.LYRA_MODEL || "nvidia/nemotron-3.5-super-vl-120b-a12b";
+// her webcam eyes: Nano Omni (as good as the 120B in tests, ~1 s), the 120B if it fails (2026-11-25)
+const EYES_MODEL = process.env.LYRA_EYES_MODEL || "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+const EYES_FALLBACK = process.env.LYRA_EYES_FALLBACK || "nvidia/nemotron-3.5-super-vl-120b-a12b";
 const OWNER_KEY = process.env.OWNER_KEY || "";
 
 // ---------- brain: exactly one request ----------
@@ -103,21 +106,29 @@ async function describeSnapshot(question, who) {
   const age = Date.now() - vision.snapshotAt;
   if (!vision.snapshot || age > 7000) { console.log(`[eyes] asked to look, but no fresh picture (${vision.snapshot ? Math.round(age / 1000) + "s old" : "none"})`); return null; }
   console.log(`[eyes] looking at a ${Math.round(age / 1000)}s-old picture`);
-  const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL, max_tokens: 220, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
-      messages: [{ role: "user", content: [
-        { type: "text", text: `This is a live webcam picture of ${who} sitting in front of a computer. They just said: "${question}". ` +
-          `Describe plainly and accurately what's visible that matters for that: what they're holding, wearing or doing, their expression, and anything notable around them. 2 to 4 short sentences. Don't guess beyond what you can see.` },
-        { type: "image_url", image_url: { url: vision.snapshot } },
-      ] }],
-    }),
-    signal: AbortSignal.timeout(45000),
-  });
-  if (!res.ok) throw new Error(`vision ${res.status}`);
-  return ((await res.json()).choices?.[0]?.message?.content || "").trim() || null;
+  let last;
+  for (const model of [EYES_MODEL, EYES_FALLBACK].filter((m, i, a) => m && a.indexOf(m) === i)) {
+    try {
+      const res = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model, max_tokens: 220, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
+          messages: [{ role: "user", content: [
+            { type: "text", text: `This is a live webcam picture of ${who} sitting in front of a computer. They just said: "${question}". ` +
+              `Describe plainly and accurately what's visible that matters for that: what they're holding, wearing or doing, their expression, and anything notable around them. 2 to 4 short sentences. Don't guess beyond what you can see.` },
+            { type: "image_url", image_url: { url: vision.snapshot } },
+          ] }],
+        }),
+        signal: AbortSignal.timeout(model === EYES_MODEL ? 20000 : 45000),
+      });
+      if (!res.ok) throw new Error(`vision ${res.status}`);
+      const text = ((await res.json()).choices?.[0]?.message?.content || "").trim();
+      if (text) return text;
+      throw new Error("vision: empty answer");
+    } catch (e) { last = e; console.log(`[eyes] ${model} failed: ${e.message}`); }
+  }
+  throw last;
 }
 
 // "What you see" in plain words for her mind.

@@ -31,9 +31,18 @@ async function readBoardOllama({ jpeg, frames, from, to, host, model, call }) {
   return text.slice(0, 900);
 }
 
+// 'nvidia': her eyes' model (Nano Omni), and the 120B if it fails (2026-11-25)
 async function readBoardNvidia({ jpeg, frames, from, to, model, call }) {
+  if (model !== 'nvidia') return readBoardNvidiaWith(model, { jpeg, frames, from, to, call });
+  const ids = [config.nvidia.visionModel, config.nvidia.visionFallback].filter((m, i, a) => m && a.indexOf(m) === i);
+  let last;
+  for (const id of ids) {
+    try { return await readBoardNvidiaWith(id, { jpeg, frames, from, to, call }); } catch (err) { last = err; }
+  }
+  throw last;
+}
+async function readBoardNvidiaWith(id, { jpeg, frames, from, to, call }) {
   if (!config.nvidia.apiKey) throw new Error('THEATER_SIGHT_MODEL is nvidia, but NVIDIA_API_KEY is empty in .env');
-  const id = model === 'nvidia' ? config.nvidia.model : model;
   const res = await call(`${config.nvidia.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {

@@ -51,6 +51,11 @@ export const config = {
     apiKey: env.NVIDIA_API_KEY,
     baseUrl: (env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, ''),
     model: env.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    // her eyes (photos, PDFs, the theater): a vision model, separate from the one she talks with (2026-11-25: talking
+    // moved to Ultra 550B, which can't see). Nano Omni read a receipt and a full rota row as well as the 120B, in ~1 s
+    // instead of 27-47 s; the 120B is the backup when it fails
+    visionModel: env.NVIDIA_VISION_MODEL || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+    visionFallback: env.NVIDIA_VISION_FALLBACK || 'nvidia/nemotron-3.5-super-vl-120b-a12b',
     maxTokens: num(env.NVIDIA_MAX_TOKENS, 256),
     // nemotron-3-embed-1b reached end of life on 2026-11-23 (HTTP 410): her recall found nothing after that
     embedModel: env.NVIDIA_EMBED_MODEL || 'nvidia/nemotron-3.5-embed-1b',

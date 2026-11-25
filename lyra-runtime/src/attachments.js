@@ -57,20 +57,33 @@ export async function transcribeVoiceMessage(att) {
 }
 
 // ---------- her eyes on a picture (photo or PDF page) ----------
+// Nano Omni first (as good as the 120B on receipts and rotas, ~1 s instead of 27-47 s), the 120B if it fails
 async function vision(prompt, buf, mime = 'image/jpeg', maxTokens = 350) {
-  const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
-    method: 'POST', signal: AbortSignal.timeout(90_000),
-    headers: { Authorization: `Bearer ${config.nvidia.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: config.nvidia.model, max_tokens: maxTokens, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: prompt },
-        { type: 'image_url', image_url: { url: `data:${mime};base64,${buf.toString('base64')}` } },
-      ] }],
-    }),
-  });
-  if (!res.ok) throw new Error(`vision ${res.status}`);
-  return ((await res.json()).choices?.[0]?.message?.content || '').trim();
+  const models = [config.nvidia.visionModel, config.nvidia.visionFallback].filter((m, i, a) => m && a.indexOf(m) === i);
+  let last;
+  for (const [i, model] of models.entries()) {
+    try {
+      const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
+        method: 'POST', signal: AbortSignal.timeout(i === 0 ? 45_000 : 90_000),
+        headers: { Authorization: `Bearer ${config.nvidia.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model, max_tokens: maxTokens, temperature: 0.2, chat_template_kwargs: { enable_thinking: false },
+          messages: [{ role: 'user', content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: `data:${mime};base64,${buf.toString('base64')}` } },
+          ] }],
+        }),
+      });
+      if (!res.ok) throw new Error(`vision ${res.status}`);
+      const text = ((await res.json()).choices?.[0]?.message?.content || '').trim();
+      if (text) return text;
+      throw new Error('vision: empty answer');
+    } catch (err) {
+      last = err;
+      if (i < models.length - 1) activity('brain', { message: `eyes: ${model} failed (${err.message.slice(0, 60)}); ${models[i + 1]} looks instead` });
+    }
+  }
+  throw last;
 }
 const lookAt = (buf, mime, question) => vision(`Chris sent this photo${question ? ` with the message: "${question}"` : ''}. Describe plainly what's in it, read out any text in it, and note anything that matters for his message. 2 to 6 short sentences. Don't guess beyond what's visible.`, buf, mime);
 const IMG_EXT = { 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
