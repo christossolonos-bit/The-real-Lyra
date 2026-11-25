@@ -164,6 +164,7 @@ function handleReply(r) {
   if (r.mood) { $('moodChip').innerHTML = `feeling <b>${r.mood}</b>`; lyraBody()?.mood(r.mood, r.state?.strength ?? .5); }
   if (r.gesture) lyraBody()?.gesture(r.gesture);
   if (r.speech) add('lyra', r.speech, 'Lyra');
+  if (r.thought) add('note', `💭 ${r.thought}`); // a quiet-moment thought: shown, never spoken
   for (const f of r.remembered || []) add('note', `Lyra will remember: ${f}`);
   if (r.grew && me.isOwner) add('note', `Lyra is changing: ${r.grew}`);
   if (r.voiceError) add('note', `(voice failed: ${r.voiceError})`);

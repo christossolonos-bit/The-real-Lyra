@@ -88,6 +88,8 @@ function unquote(reply, text) {
   let r = String(reply || '');
   const m = r.match(/^\s*\[[^\]\n]{1,40}\]:[^\n]*(\n+|$)/);
   if (m) r = r.slice(m[0].length);
+  // the label her saved thoughts carry, copied into a new one
+  r = r.replace(/^\s*\(thinking to myself[^)]*\)\s*/i, '');
   return r.trim() || String(reply || '').trim();
 }
 
@@ -249,7 +251,8 @@ function felt(m, name) {
   return ` (${name} seemed ${m.feeling}${m.moment ? `: ${m.moment}` : ''})`;
 }
 
-export async function respond({ conversation, speaker, text, voice = false, onSentence, onSearching, systemExtra, character = mainCharacter(), cue, discord = {}, due, seen = '' }) {
+// thought: a private thought (the hologram's quiet moments, 2026-11-25): not spoken, kept marked as a thought
+export async function respond({ conversation, speaker, text, voice = false, onSentence, onSearching, systemExtra, character = mainCharacter(), cue, discord = {}, due, seen = '', thought = false }) {
   // Continuity: when this person and this conversation were last active (read before updating).
   const speakerLastSeen = listContacts().find((c) => c.user_id === speaker.id)?.last_seen ?? null;
   const convLastActive = continuity.touch(conversation);
@@ -335,15 +338,23 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   // (2026-11-25: "Chris, that's not fair. TestFriend doesn't know what they're talking about")
   if (!cue && !perms.owner) userContent += `\n\n(This message is from ${speaker.name}, not Chris. Answer ${speaker.name} directly, speaking to them as "you"; don't talk about them to Chris.)`;
   // Don't loop: she's shown what she just said and told to answer what was said now instead.
-  const recentMine = rows.filter((m) => m.role === 'assistant' && (m.name ? m.name === character.name : character.main)).slice(-3).map((m) => m.content);
+  // (the last 8: in voice a repeat can't be caught once spoken, 2026-11-25: "Just watching Patch sleep…" 3 times in
+  // 13 minutes, and one "I'm not just a tool…" speech 3 times in a call)
+  const recentMine = rows.filter((m) => m.role === 'assistant' && (m.name ? m.name === character.name : character.main)).slice(-8).map((m) => m.content);
   // Tool calls and their results aren't part of the history, only what she said. Without this, every
   // turn she'd look the same thing up again (the guide, a file) and announce it as news again.
   const done = rows.filter((m) => m.role === 'assistant' && m.tools).slice(-4).map((m) => m.tools);
   if (!cue && done.length) {
     userContent += `\n\n(What you already did in your recent replies, oldest first: ${done.join('; ')}. That's done and already told; don't look it up again or report it again unless someone asks.)`;
   }
+  const short = (m) => `"${String(m).replace(/^\(thinking to myself[^)]*\)\s*/, '').replace(/\s+/g, ' ').slice(0, 140)}"`;
   if (!process.env.NO_ANTIREPEAT && !cue && recentMine.length) {
-    userContent += `\n\n(Your last reply was: "${recentMine.at(-1).replace(/\s+/g, ' ').slice(0, 200)}". Don't say that again or anything close to it. Respond to what ${speaker.name} just said, in this message.)`;
+    userContent += `\n\n(Your last replies, newest last: ${recentMine.slice(-3).map(short).join(' / ')}. Don't say any of those again or anything close: no reused lines, speeches or openings. Respond to what ${speaker.name} just said, in this message.)`;
+  }
+  // a quiet moment, or anything else she says on her own: what she said or thought lately, so it's something new
+  if (!process.env.NO_ANTIREPEAT && cue && recentMine.length) {
+    userContent += `\n\n(What you said or thought lately, newest last: ${recentMine.slice(-6).map(short).join(' / ')}. ` +
+      'This time, pick something different from all of those: another subject, another image, other words.)';
   }
   const available = enabledTools(toolCtx);
   // Shot one: decide what, if anything, to do. Banter cues never take actions.
@@ -532,7 +543,8 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   const repeated = recentMine.find((prev) => similarity(prev, reply) > 0.6);
   if (repeated) {
     logFailure({ conversation, kind: 'repeat', tool: '-', code: 'repeated_reply', note: reply.slice(0, 200) });
-    if (!voice) {
+    if (thought) reply = ''; // a private thought she already had: let it go (nothing to take back, it was never said)
+    else if (!voice) {
       reply = stripTags(await chat([
         ...messages,
         { role: 'assistant', content: reply },
@@ -568,7 +580,8 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
 
   if (!cue) addMessage(conversation, { role: 'user', userId: speaker.id, name: speaker.name, content: text });
   const used = calls.map((c) => `${c.name} ${toolTarget(c.args)}: ${toolFailed(c.result) ? 'failed' : 'ok'}`.replace(/  +/g, ' '));
-  if (reply) addMessage(conversation, { role: 'assistant', name: character.main ? null : character.name, content: reply, tools: used.length ? used.join(', ') : null });
+  // a private thought is kept as one, so later she knows she thought it and didn't say it
+  if (reply) addMessage(conversation, { role: 'assistant', name: character.main ? null : character.name, content: thought ? `(thinking to myself, not said aloud) ${reply}` : reply, tools: used.length ? used.join(', ') : null });
 
   // Lyra Core (her own learning system) watches a teacher: drafts in secret, compares, learns. The teacher isn't
   // Nemotron 120B (2026-11-25): one of the free small models (Bolt, Lightning, Gemma, in turn) answers the same

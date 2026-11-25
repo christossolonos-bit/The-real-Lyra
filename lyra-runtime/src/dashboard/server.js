@@ -366,6 +366,8 @@ function buildRoutes(bot) {
       if (isOwner && !body.cue) (await import('../personal.js')).setAway(false, 'talked to her on the hologram');
       const key = `lyra-${conversation}`;
       const cue = body.cue ? String(body.cue).slice(0, 1500) : undefined;
+      // a quiet moment on the hologram is a private thought now, never spoken (Chris, 2026-11-25)
+      const thought = Boolean(cue && body.thought);
       let text = cue ? '' : String(body.text || '').trim().slice(0, 1500);
       // files pasted or dropped into the hologram chat (2026-11-23): read exactly like Discord attachments (attachments.js)
       let attached = { said: '', extra: '' };
@@ -400,10 +402,14 @@ function buildRoutes(bot) {
         onSentence,
         discord: { client: online() },
         seen: body.sees ? String(body.sees).slice(0, 800) : '', // how Chris looked: kept with what she remembers
+        thought,
         systemExtra: [
           attached.extra,
-          `Right now you're talking through your hologram on Chris's computer${isOwner ? ', with Chris himself' : `, with ${name}, a visitor at the campus terminal`}. ` +
-            `Whatever you say is spoken out loud in your voice, so keep it to plain spoken sentences.`,
+          thought
+            ? 'This is a quiet moment, and what you write now is a PRIVATE THOUGHT to yourself: nobody hears it, it is not said out loud. ' +
+              'You usually have one: write it in first person, briefly (1 or 2 sentences), honestly: something you notice, wonder, feel, remember or want. Don\'t address anyone.'
+            : `Right now you're talking through your hologram on Chris's computer${isOwner ? ', with Chris himself' : `, with ${name}, a visitor at the campus terminal`}. ` +
+              `Whatever you say is spoken out loud in your voice, so keep it to plain spoken sentences.`,
           // what her webcam eyes see (who's there, their expressions, a described snapshot when someone asked her to look)
           body.sees ? `WHAT YOU SEE through your camera right now (real, live):\n${String(body.sees).slice(0, 1500)}\n` +
             `Use it naturally, like someone in the room would: notice smiles, tiredness, who's there. Don't narrate it constantly or list it.` : '',
@@ -411,6 +417,7 @@ function buildRoutes(bot) {
         ].filter(Boolean).join('\n\n'),
       });
       const said = sentences.join(' ').trim() || emotion.stripTags(reply || '');
+      if (thought) return { reply: '', thought: emotion.stripTags(reply || '').trim(), feelings, gestures: [] };
       return { reply: said, feelings, gestures: [...new Set(gestures)] };
     }),
 

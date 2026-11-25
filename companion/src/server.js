@@ -145,11 +145,11 @@ Trust this over anything you described earlier; things change.`
   return lines.join("\n");
 }
 
-async function runtimeTurn({ name, isOwner, text, cue, files }) {
+async function runtimeTurn({ name, isOwner, text, cue, files, thought }) {
   const sees = await seesText(name, text);
   const res = await fetch(`${RUNTIME}/api/lyra/turn`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, isOwner, text, cue, sees, files }), signal: AbortSignal.timeout(180000),
+    body: JSON.stringify({ name, isOwner, text, cue, sees, files, thought: Boolean(thought) }), signal: AbortSignal.timeout(180000),
   });
   if (!res.ok) throw new Error(`runtime ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const r = await res.json();
@@ -157,16 +157,16 @@ async function runtimeTurn({ name, isOwner, text, cue, files }) {
   const mood = top ? FEEL_TO_MOOD[top[0]] || "calm" : "calm";
   const gesture = (r.gestures || []).map((g) => GESTURE_MAP[g]).find(Boolean) || null;
   const speech = String(r.reply || "").trim();
-  return { speech, mood, gesture, remembered: [], journal: null, grew: null, quiet: !speech,
+  return { speech, thought: String(r.thought || "").trim(), mood, gesture, remembered: [], journal: null, grew: null, quiet: !speech,
     state: { name: mood, strength: top ? Math.min(1, top[1]) : 0.3 }, feelings: r.feelings, mind: "runtime" };
 }
 
-async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cue, files }) {
+async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cue, files, thought }) {
   busy = true;
   try {
     // her one mind first
     try {
-      const out = await runtimeTurn({ name, isOwner, text: cue ? undefined : (text ?? content), cue: cue ? content : undefined, files });
+      const out = await runtimeTurn({ name, isOwner, text: cue ? undefined : (text ?? content), cue: cue ? content : undefined, files, thought });
       if (runtimeUp !== true) { runtimeUp = true; console.log("Using Lyra's runtime mind (one memory with Discord)."); }
       let audio = null, voiceError = null;
       if (out.speech && voice === "page") { try { audio = await speak(out.speech); } catch (e) { voiceError = e.message; } }
@@ -174,6 +174,8 @@ async function turnNow({ name, isOwner, content, logAs, voice = "page", text, cu
     } catch (e) {
       if (runtimeUp !== false) { runtimeUp = false; console.log(`Lyra's runtime isn't reachable (${e.message}); using the standalone mind.`); }
     }
+    // a quiet-moment thought without her runtime: nothing (the standalone mind would only say it out loud)
+    if (thought) return { speech: "", thought: "", quiet: true, state: mind.moodState() };
     // Nemotron tends to drop the tag lines after a turn or two, so every turn carries a short reminder
     // (same single request; the reminder is not stored in her history).
     const reminder = `\n\n(Answer as Lyra, out loud. Then on new lines at the very end: always [[mood: word | strength]]. ` +
@@ -274,12 +276,13 @@ const routes = {
     const shown = text || `(sent ${files.map((f) => f.name).join(", ")})`;
     return turn({ name, isOwner, text, files, content: `[${clock()}] ${shown}` });
   },
-  // a quiet moment: she may say something on her own
+  // a quiet moment: she may have a thought of her own. Never spoken (Chris, 2026-11-25: "we don't need quiet moments
+  // for the hologram spoken out loud; she can still think them"): the page shows it quietly as a thought
   "POST /api/idle": async (b) => {
     const { name, isOwner } = who(b);
     const mins = Math.max(1, Math.round(Number(b.quietMinutes) || 3));
-    const content = `[quiet moment] Nobody has said anything for ${mins} minutes. ${name} is still here. If you genuinely want to, say something on your own: something on your mind, a thought from your journal, a question for them, a feeling, a small thing happening on campus. Keep it natural and short. If you'd rather stay quiet, reply only [[quiet]].`;
-    return turn({ name, isOwner, content, cue: true, logAs: `[${clock()}] (quiet for ${mins} minutes)` });
+    const content = `[quiet moment] Nobody has said anything for ${mins} minutes. ${name} is still here, quietly. What's on your mind? Think it to yourself: something you noticed, a feeling, a question you'd like to ask ${name} later, something from your journal or the episode.`;
+    return turn({ name, isOwner, content, cue: true, thought: true, voice: "none", logAs: `[${clock()}] (quiet for ${mins} minutes)` });
   },
   // the PC mic heard Chris say something
   "POST /api/heard": async (b) => {
