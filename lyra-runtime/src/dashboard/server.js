@@ -578,6 +578,13 @@ function buildRoutes(bot) {
       return { ok: true, message: done.length ? `${done.join(' and ')}.` : "She wasn't singing anything." };
     }),
     r('DELETE', '/api/songs/(?<file>.+)', ({ params }) => ({ ok: true, message: `Moved "${music.trashSong(decodeURIComponent(params.file))}" to the trash folder.` })),
+    // The Shopping page (/shopping.html): his shopping list, to see and edit (2026-11-25)
+    r('GET', '/api/shopping', async () => (await import('../shopping.js')).shoppingSnapshot()),
+    r('POST', '/api/shopping', async ({ body }) => (await import('../shopping.js')).shoppingAdd(body.text)),
+    r('PUT', '/api/shopping/(?<id>\\d+)', async ({ params, body }) => (await import('../shopping.js')).shoppingEdit(params.id, body)),
+    r('DELETE', '/api/shopping/(?<id>\\d+)', async ({ params }) => (await import('../shopping.js')).shoppingRemove(params.id)),
+    r('POST', '/api/shopping/clear-bought', async () => (await import('../shopping.js')).shoppingClearBought()),
+    r('POST', '/api/shopping/send', async () => (await import('../shopping.js')).shoppingSend(online())),
     // The Health page (/health.html): what works and what doesn't, at a glance (2026-11-25)
     r('GET', '/api/health', async () => (await import('../health.js')).healthSnapshot()),
     r('POST', '/api/health/models', async () => ({ models: await (await import('../health.js')).checkModels() })),

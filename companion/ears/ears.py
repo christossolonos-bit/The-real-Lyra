@@ -64,15 +64,50 @@ def pick_mic():
     return i, devices[i]["name"]
 
 
+class HealingWhisper:
+    """Whisper that survives a GPU reset (2026-11-25: the NVIDIA driver reset itself, and every transcription after
+    it failed with "CUDA failed with error unknown error" until Lyra was restarted). On a CUDA error it moves to the
+    CPU and does the same audio again; after a while it tries the graphics card again."""
+    GPU_REST_S = 600
+
+    def __init__(self):
+        self.model, self.device, self.gpu_rest_until = None, None, 0
+        self.load()
+
+    def load(self, cpu=False):
+        from faster_whisper import WhisperModel
+        old, self.model = self.model, None
+        del old
+        if not cpu:
+            try:
+                self.model, self.device = WhisperModel(MODEL, device="cuda", compute_type="float16"), "cuda"
+                print(f"Whisper {MODEL} on the GPU.")
+                return
+            except Exception as e:
+                print(f"GPU not available ({e.__class__.__name__}), using the CPU.")
+        self.model, self.device = WhisperModel(MODEL, device="cpu", compute_type="int8"), "cpu"
+        if cpu:
+            print(f"Whisper {MODEL} on the CPU for now (the graphics card stopped answering).")
+
+    def text(self, audio, **kw):
+        if self.device == "cpu" and self.gpu_rest_until and time.time() > self.gpu_rest_until:
+            self.gpu_rest_until = 0
+            self.load()  # the card may be back: try it again
+        try:
+            segs, _ = self.model.transcribe(audio, **kw)
+            return " ".join(s.text.strip() for s in segs).strip()  # (errors surface here, while the segments are made)
+        except RuntimeError as e:
+            if self.device != "cuda" or "cuda" not in str(e).lower():
+                raise
+            print(f"The graphics card stopped answering ({e}); moving to the CPU and trying again.", flush=True)
+            self.load(cpu=True)
+            self.gpu_rest_until = time.time() + self.GPU_REST_S
+            segs, _ = self.model.transcribe(audio, **kw)
+            return " ".join(s.text.strip() for s in segs).strip()
+
+
 def load_whisper():
-    from faster_whisper import WhisperModel
-    try:
-        m = WhisperModel(MODEL, device="cuda", compute_type="float16")
-        print(f"Whisper {MODEL} on the GPU.")
-    except Exception as e:
-        print(f"GPU not available ({e.__class__.__name__}), using the CPU.")
-        m = WhisperModel(MODEL, device="cpu", compute_type="int8")
-    return m
+    return HealingWhisper()
 
 
 def serve_transcription(whisper, lock):
@@ -94,8 +129,7 @@ def serve_transcription(whisper, lock):
             text = ""
             if len(audio) > RATE * 0.4:
                 with lock:
-                    segs, _ = whisper.transcribe(audio, language="en", beam_size=3, condition_on_previous_text=False)
-                    text = " ".join(s.text.strip() for s in segs).strip()
+                    text = whisper.text(audio, language="en", beam_size=3, condition_on_previous_text=False)
             if text.lower() in JUNK:
                 text = ""
             body = json.dumps({"text": text}).encode()
@@ -210,8 +244,7 @@ def main():
             try: post("/api/ears/activity", {"ownerKey": OWNER_KEY, "state": "transcribing"})
             except Exception: pass
             with lock:
-                segs, _ = whisper.transcribe(audio, language="en", beam_size=3, vad_filter=False, condition_on_previous_text=False)
-                text = " ".join(s.text.strip() for s in segs).strip()
+                text = whisper.text(audio, language="en", beam_size=3, vad_filter=False, condition_on_previous_text=False)
             if text.lower() in JUNK or len(text) < 2:
                 try: post("/api/ears/activity", {"ownerKey": OWNER_KEY, "state": "idle"})
                 except Exception: pass

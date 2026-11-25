@@ -6,35 +6,54 @@ import { activity } from '../events.js';
 // Models download once (from Hugging Face) into ./models, then run fully offline on this PC.
 env.cacheDir = path.join(ROOT, 'models');
 
-let loading = null;
 let queue = Promise.resolve();
 
-// Loads Whisper on the GPU (DirectML) if possible, otherwise on the CPU.
-export function loadWhisper() {
-  loading ??= (async () => {
+// One Whisper per device ('dml' = the graphics card through DirectML, 'cpu'), loaded on first use.
+const pipes = {};
+// After a GPU reset (2026-11-25: the NVIDIA driver reset itself while the theater transcribed a video, and every
+// transcription after it failed for hours with "887A0005 the GPU device instance has been suspended") the card is
+// left alone for a while: the CPU hears meanwhile, then the card is tried again.
+const GPU_REST_MS = 10 * 60_000;
+let gpuBrokenUntil = 0;
+const GPU_ERROR = /887A000[4-7]|DmlExecutionProvider|device instance has been suspended|GetDeviceRemovedReason|device (was )?removed|DXGI_ERROR|readback failed/i;
+export const isGpuError = (err) => GPU_ERROR.test(String(err?.message || err));
+
+function devicesNow() {
+  const wanted = config.whisper.device === 'auto' ? ['dml', 'cpu'] : [config.whisper.device];
+  return Date.now() < gpuBrokenUntil ? wanted.filter((d) => d !== 'dml').concat(wanted.includes('cpu') ? [] : ['cpu']) : wanted;
+}
+function loadOn(device) {
+  pipes[device] ??= (async () => {
     const started = Date.now();
-    const devices = config.whisper.device === 'auto' ? ['dml', 'cpu'] : [config.whisper.device];
-    let lastError;
-    for (const device of devices) {
-      try {
-        const asr = await pipeline('automatic-speech-recognition', config.whisper.model, { device });
-        activity('ready', { message: `Whisper ${config.whisper.model} loaded on ${device} in ${((Date.now() - started) / 1000).toFixed(1)}s` });
-        return asr;
-      } catch (err) {
-        lastError = err;
-      }
-    }
-    loading = null; // let the next utterance retry
-    throw new Error(`Could not load Whisper: ${lastError?.message}`);
+    const asr = await pipeline('automatic-speech-recognition', config.whisper.model, { device });
+    activity('ready', { message: `Whisper ${config.whisper.model} loaded on ${device} in ${((Date.now() - started) / 1000).toFixed(1)}s` });
+    return asr;
   })();
-  return loading;
+  pipes[device].catch(() => { delete pipes[device]; }); // a failed load is retried next time
+  return pipes[device];
+}
+// Loads Whisper on the GPU (DirectML) if possible, otherwise on the CPU. cpu: the CPU one only.
+export async function loadWhisper({ cpu = false } = {}) {
+  let lastError;
+  for (const device of cpu ? ['cpu'] : devicesNow()) {
+    try { return { asr: await loadOn(device), device }; } catch (err) { lastError = err; }
+  }
+  throw new Error(`Could not load Whisper: ${lastError?.message}`);
+}
+function gpuWentDown(err) {
+  gpuBrokenUntil = Date.now() + GPU_REST_MS;
+  const broken = pipes.dml;
+  delete pipes.dml;
+  broken?.then((asr) => asr?.dispose?.()).catch(() => {});
+  activity('error', { where: 'hearing', message: `The graphics card stopped answering (${String(err.message).slice(0, 80)}): hearing on the CPU for ${GPU_REST_MS / 60_000} min, then the card is tried again.` });
 }
 
 // Takes 48kHz mono 16-bit PCM (what the voice receiver produces) and returns the transcript.
-export function transcribeLocal(pcm48k, { timestamps = false } = {}) {
+// cpu: always on the CPU (the theater's long show audio: heavy, and not worth risking the card for)
+export function transcribeLocal(pcm48k, { timestamps = false, cpu = false } = {}) {
   // One transcription at a time so overlapping speakers don't fight over the CPU/GPU.
   const job = queue.then(async () => {
-    const asr = await loadWhisper();
+    let { asr, device } = await loadWhisper({ cpu });
     const options = {};
     const multilingual = !config.whisper.model.endsWith('.en');
     if (multilingual && config.fish.language) {
@@ -42,7 +61,16 @@ export function transcribeLocal(pcm48k, { timestamps = false } = {}) {
       options.task = 'transcribe';
     }
     if (timestamps) options.return_timestamps = true;
-    const result = await asr(downsample(pcm48k), options);
+    let result;
+    try {
+      result = await asr(downsample(pcm48k), options);
+    } catch (err) {
+      if (device !== 'dml' || !isGpuError(err)) throw err;
+      // the card went away mid-job: the same words again, on the CPU
+      gpuWentDown(err);
+      ({ asr, device } = await loadWhisper({ cpu: true }));
+      result = await asr(downsample(pcm48k), options);
+    }
     if (!timestamps) return clean(result.text);
     const chunks = Array.isArray(result.chunks) ? result.chunks : [];
     if (chunks.length) {

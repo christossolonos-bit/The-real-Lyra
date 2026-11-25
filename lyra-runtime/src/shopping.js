@@ -71,3 +71,67 @@ export function shoppingLine() {
   const open = load().items.filter((i) => !i.done);
   return open.length ? `His shopping list: ${open.map((i) => i.text).join(', ')}.` : '';
 }
+
+// ---------- the Shopping page (dashboard /shopping.html, 2026-11-25): see and edit the list ----------
+const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+export function shoppingSnapshot() {
+  const d = load();
+  return {
+    open: d.items.filter((i) => !i.done),
+    bought: d.items.filter((i) => i.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20),
+    sentAt: d.sentAt || null,
+  };
+}
+export function shoppingAdd(text) {
+  const d = load();
+  const add = items(text);
+  if (!add.length) throw fail('Type what to add.');
+  const added = [];
+  for (const t of add) {
+    if (d.items.some((i) => !i.done && same(i.text, t))) continue;
+    d.items.push({ id: nextId(d.items), text: t.slice(0, 80), at: Date.now(), done: false });
+    added.push(t);
+  }
+  save(d);
+  return { ok: true, message: added.length ? `Added ${added.join(', ')}.` : 'Already on the list.' };
+}
+export function shoppingEdit(id, { text, done } = {}) {
+  const d = load();
+  const it = d.items.find((i) => i.id === Number(id));
+  if (!it) throw fail('No such item.', 404);
+  if (text !== undefined) {
+    const t = String(text).trim().slice(0, 80);
+    if (!t) throw fail('The item needs a name.');
+    it.text = t;
+  }
+  if (done !== undefined) {
+    it.done = Boolean(done);
+    if (it.done) it.doneAt = Date.now(); else delete it.doneAt;
+  }
+  save(d);
+  return { ok: true, message: done === true ? `Ticked off ${it.text}.` : done === false ? `${it.text} is back on the list.` : 'Saved.' };
+}
+export function shoppingRemove(id) {
+  const d = load();
+  const it = d.items.find((i) => i.id === Number(id));
+  if (!it) throw fail('No such item.', 404);
+  d.items = d.items.filter((i) => i !== it);
+  save(d);
+  return { ok: true, message: `Removed ${it.text}.` };
+}
+export function shoppingClearBought() {
+  const d = load();
+  const n = d.items.filter((i) => i.done).length;
+  d.items = d.items.filter((i) => !i.done);
+  save(d);
+  return { ok: true, message: n ? `Cleared ${n} bought item${n > 1 ? 's' : ''}.` : 'Nothing bought to clear.' };
+}
+// "Send to my phone" from the page: the same DM as at the supermarket (Discord has to be online)
+export async function shoppingSend(client) {
+  const d = load();
+  d.sentAt = 0; // he pressed it on purpose: don't hold it back as "sent a moment ago"
+  save(d);
+  const r = await shoppingTool({ action: 'send' }, { client });
+  if (/isn't connected|empty/i.test(r)) throw fail(r.split('\n')[0], 409);
+  return { ok: true, message: 'Sent to your phone.' };
+}

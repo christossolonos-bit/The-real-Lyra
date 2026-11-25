@@ -41,7 +41,8 @@ export async function transcribeSpeech(pcm48k) {
 /** Theater show audio → timed lines [{ start, end, text }] for who-said-what + reaction planning. */
 export async function transcribeShowLines(pcm48k) {
   try {
-    const lines = await transcribeLocal(pcm48k, { timestamps: true });
+    // on the CPU: a whole show back to back on the graphics card is what made the driver reset (2026-11-25)
+    const lines = await transcribeLocal(pcm48k, { timestamps: true, cpu: true });
     if (Array.isArray(lines) && lines.length) return lines;
   } catch (err) {
     activity('error', { where: 'theater stt timestamps', message: err.message });

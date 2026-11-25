@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lyra Shopping</title>
+<style>
+  :root { --bg:#f6f6f8; --panel:#fff; --text:#18181b; --muted:#6b6b76; --border:#e3e3e8; --accent:#0e9fbf; --good:#1f9d55; --bad:#c43c3c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1116; --panel:#111b22; --text:#e6f4f8; --muted:#8aa3ad; --border:#21323c; --accent:#3fe0ff; --good:#3ddc84; --bad:#ff6b6b; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--panel); flex-wrap:wrap; }
+  header a { color:var(--muted); text-decoration:none; }
+  header h1 { margin:0; font-size:18px; }
+  header .right { margin-left:auto; }
+  main { max-width:640px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px 18px; min-width:0; }
+  h2 { margin:0 0 10px; font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  button { font:inherit; cursor:pointer; }
+  .btn { border:1px solid var(--border); background:var(--panel); color:var(--text); border-radius:8px; padding:7px 14px; font-size:14px; }
+  .btn.go { background:var(--accent); color:#001; border-color:var(--accent); }
+  .btn.small { padding:3px 10px; font-size:12px; text-transform:none; letter-spacing:0; }
+  .add { display:flex; gap:8px; }
+  .add input { flex:1; min-width:0; font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:8px 12px; }
+  .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { display:flex; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); }
+  li:last-child { border-bottom:0; }
+  li input[type=checkbox] { width:20px; height:20px; accent-color:var(--good); flex:none; cursor:pointer; }
+  li .name { flex:1; min-width:0; overflow-wrap:anywhere; border:1px solid transparent; border-radius:6px; padding:3px 6px; outline:none; }
+  li .name:focus { border-color:var(--accent); background:var(--bg); }
+  li.bought .name { color:var(--muted); text-decoration:line-through; }
+  li .del { border:0; background:none; color:var(--muted); font-size:18px; line-height:1; padding:2px 6px; border-radius:6px; }
+  li .del:hover { color:var(--bad); background:var(--bg); }
+  .empty { color:var(--muted); padding:6px 0; }
+  .msg { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:14px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:calc(100% - 32px); }
+  .msg.show { opacity:1; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Dashboard</a>
+  <h1>Shopping list</h1>
+  <span class="right"><button class="btn" id="send" title="Sends the list to your phone as a Discord DM">📱 Send to my phone</button></span>
+</header>
+<main>
+  <section class="card">
+    <form class="add" id="addForm">
+      <input id="addText" placeholder="Add items, e.g. milk, eggs and bread" aria-label="Add items" autocomplete="off">
+      <button class="btn go" type="submit">Add</button>
+    </form>
+    <div class="hint">Tick what you bought. Click a name to change it. Lyra sees the same list.</div>
+  </section>
+  <section class="card">
+    <h2 id="openTitle">To buy</h2>
+    <ul id="open"></ul>
+  </section>
+  <section class="card">
+    <h2>Bought <button class="btn small" id="clear" title="Remove the bought items for good">Clear bought</button></h2>
+    <ul id="bought"></ul>
+  </section>
+</main>
+<div class="msg" id="msg"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function toast(t) { const m = $('#msg'); m.textContent = t; m.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => m.classList.remove('show'), 2500); }
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const row = (i, bought) => `<li class="${bought ? 'bought' : ''}" data-id="${i.id}">
+  <input type="checkbox" ${bought ? 'checked' : ''} aria-label="Bought ${esc(i.text)}">
+  <span class="name" contenteditable="true" spellcheck="false">${esc(i.text)}</span>
+  <button class="del" title="Remove ${esc(i.text)}" aria-label="Remove ${esc(i.text)}">×</button></li>`;
+async function load() {
+  if (document.activeElement?.classList?.contains('name')) return; // don't redraw while he's typing a name
+  const s = await api('GET', '/api/shopping');
+  $('#openTitle').textContent = s.open.length ? `To buy (${s.open.length})` : 'To buy';
+  $('#open').innerHTML = s.open.length ? s.open.map((i) => row(i, false)).join('') : '<li class="empty">Nothing on the list.</li>';
+  $('#bought').innerHTML = s.bought.length ? s.bought.map((i) => row(i, true)).join('') : '<li class="empty">Nothing ticked off yet.</li>';
+}
+$('#addForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const t = $('#addText').value.trim(); if (!t) return;
+  try { toast((await api('POST', '/api/shopping', { text: t })).message); $('#addText').value = ''; load(); } catch (err) { toast(err.message); }
+};
+document.addEventListener('change', async (e) => {
+  if (e.target.type !== 'checkbox') return;
+  const id = e.target.closest('li').dataset.id;
+  try { toast((await api('PUT', `/api/shopping/${id}`, { done: e.target.checked })).message); load(); } catch (err) { toast(err.message); load(); }
+});
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.del'); if (!b) return;
+  try { toast((await api('DELETE', `/api/shopping/${b.closest('li').dataset.id}`)).message); load(); } catch (err) { toast(err.message); }
+});
+// a name edited in place is saved when he leaves it or presses Enter
+document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList?.contains('name')) { e.preventDefault(); e.target.blur(); } });
+document.addEventListener('focusout', async (e) => {
+  if (!e.target.classList?.contains('name')) return;
+  const li = e.target.closest('li'), text = e.target.textContent.trim();
+  try { await api('PUT', `/api/shopping/${li.dataset.id}`, { text }); toast('Saved.'); } catch (err) { toast(err.message); }
+  load();
+});
+$('#clear').onclick = async () => { try { toast((await api('POST', '/api/shopping/clear-bought')).message); load(); } catch (err) { toast(err.message); } };
+$('#send').onclick = async () => { try { toast((await api('POST', '/api/shopping/send')).message); } catch (err) { toast(err.message); } };
+load().catch((err) => toast(`Couldn't load: ${err.message}`));
+setInterval(() => load().catch(() => {}), 15000); // picks up what she adds while the page is open
+</script>
+</body>
+</html>

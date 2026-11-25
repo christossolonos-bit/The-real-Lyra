@@ -56,8 +56,15 @@ export async function healthSnapshot() {
   const remembered = ev.filter((e) => e.type === 'remembered').length;
   const memErr = (errorGroups['memory extraction']?.count || 0) + (errorGroups['memory recall']?.count || 0);
   add('Memory', memErr ? 'bad' : 'ok', memErr ? `${memErr} memory errors in the last hour: "${(errorGroups['memory extraction'] || errorGroups['memory recall']).last}"` : `Saving and recall working${remembered ? ` (${remembered} saves in the last hour)` : ''}.`);
+  // hearing (2026-11-25: after a GPU driver reset every voice reply and voice message failed for hours)
+  const GPU = /887A000|DmlExecutionProvider|CUDA failed|device instance has been suspended|readback failed/i;
+  const deaf = errors.filter((e) => GPU.test(String(e.message)) && /voice reply|attachment|theater stt/.test(e.where || '')).length;
+  const moved = errors.filter((e) => e.where === 'hearing').length;
+  if (deaf >= 3) add('Hearing', 'bad', `${deaf} times she couldn't hear (voice calls or voice messages) because the graphics card stopped answering. Restart her with Start Lyra.bat.`);
+  else if (moved) add('Hearing', 'warn', 'The graphics card stopped answering, so she hears on the CPU for now (a little slower); it tries the card again after 10 minutes.');
+  else add('Hearing', 'ok', 'Voice calls and voice messages are being heard.');
   // eyes
-  const eyesFail = fallbacks.filter((e) => /^eyes:/.test(e.message || '')).length + (errorGroups.attachment?.count || 0);
+  const eyesFail = fallbacks.filter((e) => /^eyes:/.test(e.message || '')).length + (errorGroups.attachment?.count || 0) - errors.filter((e) => e.where === 'attachment' && GPU.test(String(e.message))).length;
   add('Eyes', eyesFail ? 'warn' : 'ok', eyesFail ? `${eyesFail} photo problems in the last hour (the backup looked, or a photo couldn't be read).` : `Using ${short(config.nvidia.visionModel)}, backup ${short(config.nvidia.visionFallback)}.`);
   // YouTube
   try {
@@ -79,7 +86,7 @@ export async function healthSnapshot() {
   } catch {}
   // anything else that failed
   for (const g of Object.values(errorGroups)) {
-    if (['memory extraction', 'memory recall', 'attachment', 'youtube'].includes(g.where)) continue;
+    if (['memory extraction', 'memory recall', 'attachment', 'youtube', 'voice reply', 'hearing', 'theater stt timestamps'].includes(g.where) && (g.where !== 'voice reply' || GPU.test(g.last))) continue;
     add(`Errors: ${g.where}`, g.count >= 3 ? 'bad' : 'warn', `${g.count}× in the last hour, last: "${g.last}"`);
   }
 
