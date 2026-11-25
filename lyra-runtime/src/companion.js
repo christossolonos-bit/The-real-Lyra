@@ -536,15 +536,24 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   const used = calls.map((c) => `${c.name} ${toolTarget(c.args)}: ${toolFailed(c.result) ? 'failed' : 'ok'}`.replace(/  +/g, ' '));
   if (reply) addMessage(conversation, { role: 'assistant', name: character.main ? null : character.name, content: reply, tools: used.length ? used.join(', ') : null });
 
-  // Lyra Core (her own learning system) watches the teacher: drafts in secret, compares, learns.
-  if (!cue && character.main && reply && speaker.id !== 'dashboard') {
-    try {
-      const learned = core.observe({ speaker, text, reply, tools: calls.map((c) => c.name) });
-      if (learned) activity('core', { intent: learned.intent, closeness: Math.round(learned.score * 100), reward: learned.reward, speaker: speaker.name });
-      if (learned && voice) coreEcho(conversation, learned, calls.length > 0);
-    } catch (err) {
-      activity('error', { where: 'core', message: err.message });
-    }
+  // Lyra Core (her own learning system) watches a teacher: drafts in secret, compares, learns. The teacher isn't
+  // Nemotron 120B (2026-11-25): one of the free small models (Bolt, Lightning, Gemma, in turn) answers the same
+  // prompt Lyra had, in the background, and the Core learns from that. Skipped on tool turns (not about how she
+  // talks) and while the free request budget is busy, so her own replies always come first.
+  if (!cue && character.main && reply && speaker.id !== 'dashboard' && !calls.length && config.brain === 'nvidia') {
+    (async () => {
+      try {
+        const { teacherReply, nvidiaCallsLastMinute } = await import('./llm.js');
+        if (nvidiaCallsLastMinute() >= 25) return;
+        const teacher = await teacherReply(messages);
+        if (!teacher) return;
+        const learned = core.observe({ speaker, text, reply: teacher.text, tools: [] });
+        if (learned) activity('core', { intent: learned.intent, closeness: Math.round(learned.score * 100), reward: learned.reward, speaker: speaker.name, teacher: teacher.model.split('/').pop() });
+        if (learned && voice) coreEcho(conversation, learned, false);
+      } catch (err) {
+        activity('error', { where: 'core', message: err.message });
+      }
+    })();
   }
 
   // She's said it, so those are done.

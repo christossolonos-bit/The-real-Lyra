@@ -23,7 +23,6 @@ const MAX_EXCHANGES = 60;
 const PAUSE_MS = 4000;          // between exchanges without voices (about 1 NVIDIA request each)
 const BUDGET_PER_MIN = 20;      // of NVIDIA's ~40 free requests a minute, at most this many while the lab runs
 let baby = createCore({ file: FILE, slots: true });
-let bigSkipUntil = 0;
 const lab = { running: false, topic: '', transcript: [], scores: [], exchanges: 0, started: 0, error: '', voice: false, voices: false, waiting: false, stopping: false };
 
 // what it says when it has learned nothing that fits: imitation, like a baby repeating the last words it heard
@@ -62,8 +61,8 @@ export function stageOf(phrases = 0) {
   return { ...STAGES[i], level: i + 1, of: STAGES.length, next: next ? { name: next.name, at: next.from } : null };
 }
 
-// Lyra's side: her next line, and the answer she'd have liked to her previous line. Big model first, Lightning when
-// it's slow (the same free NVIDIA key as her replies)
+// Lyra's side: her next line, and the answer she'd have liked to her previous line, written by the free small
+// models in turn (the same free NVIDIA key as her replies)
 async function lyraTurn(prevLine) {
   const { nvidiaJson } = await import('./llm.js');
   const recent = lab.transcript.slice(-12).map((t) => `${t.who === 'lyra' ? 'Lyra' : 'Baby'}: ${t.text}`).join('\n');
@@ -79,17 +78,14 @@ async function lyraTurn(prevLine) {
       `Reply with JSON only: {"better": "<the answer you would have liked the Baby to give to your previous line, in first person as the Baby, ${st.length}; empty if there was no previous line>", "say": "<your next line to the Baby>"}` },
     { role: 'user', content: `${recent ? `The conversation so far:\n${recent}\n\n` : 'This is the very start: greet the Baby and ask it something simple.\n'}${prevLine ? `Your previous line was: "${prevLine}"` : ''}` },
   ];
-  // the big model only while it's quick: once it's slow (here or in her replies), Lightning for 10 minutes, so a turn
-  // is one request, not two
-  const { bigModelSlow } = await import('./llm.js');
-  const skipBig = bigModelSlow() || Date.now() < bigSkipUntil;
-  const plan = [...(skipBig ? [] : [[config.nvidia.model, 10_000]]), ...(config.nvidia.fallbackModels || []).map((m) => [m, 20_000])];
-  for (const [model, ms] of plan) {
+  // the teacher this turn: the free small models in turn (Bolt, Lightning, Gemma), not Nemotron 120B (2026-11-25),
+  // so the baby doesn't grow up on one model's style; the next one answers if one fails
+  const { nextTeachers } = await import('./llm.js');
+  for (const model of nextTeachers()) {
     try {
-      const j = await nvidiaJson(messages, model, { timeoutMs: ms, maxTokens: 300, temperature: 0.7 });
+      const j = await nvidiaJson(messages, model, { timeoutMs: 20_000, maxTokens: 300, temperature: 0.7 });
       if (j && typeof j.say === 'string' && j.say.trim()) return { say: j.say.trim().slice(0, 300), better: String(j.better || '').trim().slice(0, 300), model };
     } catch {}
-    if (model === config.nvidia.model) bigSkipUntil = Date.now() + 10 * 60_000;
   }
   throw new Error("Lyra's models didn't answer (NVIDIA busy?)");
 }

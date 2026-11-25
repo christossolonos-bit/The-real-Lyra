@@ -439,6 +439,35 @@ export async function nvidiaJson(messages, model, { timeoutMs, maxTokens, temper
     }
   }
 }
+
+// The Cores' teachers (2026-11-25): the free small models take turns, so the Cores learn from three models of two
+// companies instead of Nemotron 120B. teacherReply writes what Lyra would say to a turn (plain text, no tools).
+let teacherTurn = 0;
+export function nextTeachers() {
+  const list = config.nvidia.teacherModels?.length ? config.nvidia.teacherModels : config.nvidia.planModels || [];
+  const i = teacherTurn++ % Math.max(1, list.length);
+  return [...list.slice(i), ...list.slice(0, i)];
+}
+export async function teacherReply(messages, { timeoutMs = 15_000, maxTokens } = {}) {
+  for (const model of nextTeachers()) {
+    try {
+      noteNvidiaCall();
+      const res = await fetch(`${config.nvidia.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: nvidiaHeaders(),
+        body: JSON.stringify({
+          model, messages: messages.map(toOpenAI), temperature: 0.6, top_p: 0.95,
+          max_tokens: maxTokens ?? config.nvidia.maxTokens ?? 256, chat_template_kwargs: { enable_thinking: false },
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) continue;
+      const text = String((await res.json()).choices?.[0]?.message?.content ?? '').trim();
+      if (text) return { text, model };
+    } catch {}
+  }
+  return null;
+}
 async function openRouterJson(messages, { timeoutMs }) {
   if (!config.openrouter.apiKey) throw new Error('OpenRouter is the brain, but OPENROUTER_API_KEY is empty in .env');
   const res = await fetch(`${OPENROUTER}/chat/completions`, {

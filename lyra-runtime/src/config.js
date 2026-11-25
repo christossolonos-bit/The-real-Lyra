@@ -56,13 +56,17 @@ export const config = {
     embedModel: env.NVIDIA_EMBED_MODEL || 'nvidia/nemotron-3.5-embed-1b',
     // Small fast models for the planning step (which tools a reply needs), tried in order (2026-11-25: on the
     // free API the big model took ~20 s to plan; Bolt planned 11/11 test messages right in under a second)
-    planModels: env.NVIDIA_PLAN_MODELS ? list(env.NVIDIA_PLAN_MODELS) : ['nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'google/gemma-3-4b-it'],
+    // (Gemma 3 was taken off NVIDIA's free API later that day: 404 "not found for account")
+    planModels: env.NVIDIA_PLAN_MODELS ? list(env.NVIDIA_PLAN_MODELS) : ['nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-lightning-30b-a3b'],
     planMs: num(env.NVIDIA_PLAN_MS, 5000),
     // Replies: the big model, unless it hasn't started answering in firstWordMs; then these write it instead
     fallbackModels: env.NVIDIA_FALLBACK_MODELS ? list(env.NVIDIA_FALLBACK_MODELS) : ['nvidia/nemotron-3.5-lightning-30b-a3b'],
     firstWordMs: num(env.NVIDIA_FIRST_WORD_MS, 8000),
     slowPauseMs: num(env.NVIDIA_SLOW_PAUSE_MS, 10 * 60_000), // after it was too slow, skip it this long
     toolWaitMs: num(env.NVIDIA_TOOL_WAIT_MS, 25_000), // with real tools in hand, wait this long for the big model
+    // the Cores' teachers, in turn (not Nemotron 120B): llm.js teacherReply. Two companies, so the Cores don't
+    // grow up on one model's style; MiniMax needs thinking off (it's off in every call here)
+    teacherModels: env.NVIDIA_TEACHER_MODELS ? list(env.NVIDIA_TEACHER_MODELS) : ['nvidia/nemotron-3.5-bolt-e4b', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'minimaxai/minimax-m3.1-flash'],
 
   },
   // Where semantic memory vectors come from: 'nvidia' (default) or 'ollama'.
