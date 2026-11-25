@@ -326,12 +326,18 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
   }
 
   // Assistant lines saved before there was a cast have no name; they were the bot's.
-  const history = rows.map((m) => {
+  // Her private thoughts (the hologram's quiet moments) aren't lines of the conversation: they're kept out of it and
+  // given as a note, so she knows what she thought without carrying on thinking out loud (2026-11-25: asked to greet
+  // Chris, she spoke another long thought, label and all)
+  const isThought = (m) => m.role === 'assistant' && /^\(thinking to myself[^)]*\)/i.test(String(m.content));
+  const thoughts = rows.filter(isThought).slice(-3).map((m) => String(m.content).replace(/^\(thinking to myself[^)]*\)\s*/i, ''));
+  const history = rows.filter((m) => !isThought(m)).map((m) => {
     const author = m.role === 'assistant' ? m.name ?? config.botName : m.name;
     return m.role === 'assistant' && author === character.name
       ? { role: 'assistant', content: m.content }
       : { role: 'user', content: `[${author}]: ${m.content}` };
   });
+  if (thoughts.length) systemExtra = [systemExtra, `Your own private thoughts lately (you thought them; you never said them out loud, and nobody heard them): ${thoughts.map((t) => `"${t.replace(/\s+/g, ' ').slice(0, 220)}"`).join(' / ')}. Mention one only if it fits or someone asks what you were thinking.`].filter(Boolean).join('\n\n');
 
   if (!cue) activity('heard', { conversation, voice, speaker: speaker.name, userId: speaker.id, text });
   const started = Date.now();
@@ -355,9 +361,13 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     userContent += `\n\n(Your last replies, newest last: ${recentMine.slice(-3).map(short).join(' / ')}. Don't say any of those again or anything close: no reused lines, speeches or openings. Respond to what ${speaker.name} just said, in this message.)`;
   }
   // a quiet moment, or anything else she says on her own: what she said or thought lately, so it's something new
+  // (a quiet-moment thought: what she said or thought lately, so it's something new; any other cue, like a greeting,
+  // only what she said, so she isn't steered into another thought)
   if (!process.env.NO_ANTIREPEAT && cue && recentMine.length) {
-    userContent += `\n\n(What you said or thought lately, newest last: ${recentMine.slice(-6).map(short).join(' / ')}. ` +
-      'This time, pick something different from all of those: another subject, another image, other words.)';
+    const lately = thought ? recentMine.slice(-6) : recentMine.filter((m) => !/^\(thinking to myself/i.test(String(m))).slice(-3);
+    if (lately.length) userContent += thought
+      ? `\n\n(What you said or thought lately, newest last: ${lately.map(short).join(' / ')}. This time, pick something different from all of those: another subject, another image, other words.)`
+      : `\n\n(What you said lately, newest last: ${lately.map(short).join(' / ')}. Don't repeat those.)`;
   }
   const available = enabledTools(toolCtx);
   // Shot one: decide what, if anything, to do. Banter cues never take actions.
@@ -505,7 +515,9 @@ export async function respond({ conversation, speaker, text, voice = false, onSe
     if (quoting && /^\s*\[[^\]\n]{1,40}\]:/.test(s)) return;
     if (quoting && text && s.trim() && String(text).includes(s.trim().replace(/[.!?…]+$/, ''))) return; // the rest of the quote
     quoting = false;
-    return onSentence(s);
+    // the label her saved thoughts carry is never said out loud
+    const said = String(s).replace(/^\s*\(thinking to myself[^)]*\)\s*/i, '');
+    return said.trim() ? onSentence(said) : undefined;
   });
   const chatOpts = {
     onSentence: spoken || undefined,
