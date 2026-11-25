@@ -159,6 +159,13 @@ function addressed(text) {
 }
 // "Lyra, stop" / "turn it off" / "pause the music" / "enough"...
 const MUSIC_STOP = /\b(stop|pause|turn (it |that |this |the music |the song )?off|shut (it |that )?(off|down)|kill (it|that|the music|the song)|enough|no more music|silence)\b/i;
+// "Lyra, stop": her name, then stop, in a short line (so "don't stop telling me" or a long sentence that happens to
+// contain both words doesn't cut her off)
+function isStopTalking(text) {
+  const t = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}' ]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.split(' ').length > 6 || /\b(don'?t|do not|never)\b/.test(t)) return false;
+  return addressed(t) && /\bstop\b/.test(t);
+}
 
 class VoiceSession {
   constructor(connection, voiceChannel, textChannel) {
@@ -286,6 +293,19 @@ class VoiceSession {
 
     const heard = await transcribeSpeech(pcm);
     if (!heard) return;
+    // "Lyra, stop" (Chris, 2026-11-25): anyone in the call (not a bot) cuts her off at once: what she's saying,
+    // anything she was about to say, a song in the call and one being sung. Handled here, before the pause that
+    // waits for more words, and without her brain, so it's instant. She doesn't answer it: silence is the point.
+    if (!member?.user?.bot && isStopTalking(heard)) {
+      this.held.delete(userId);
+      this.interrupt();
+      if (this.music.on) this.stopMusic();
+      stopSinging();
+      addMessage(this.conversation, { role: 'user', userId, name: speaker.name, content: heard });
+      addMessage(this.conversation, { role: 'assistant', content: '(stopped talking when asked)' });
+      activity('barge-in', { guild: this.guild.name, by: speaker.name, how: `said "${heard.slice(0, 40)}"` });
+      return;
+    }
     // a pause isn't the end: hold the words a moment, and join anything said next into the same turn
     const text = await this.gather(userId, heard);
     if (text === null) return; // joined onto the turn that's already waiting
